@@ -8,8 +8,8 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/coyove/bbolt/internal/btesting"
 	bolt "go.etcd.io/bbolt"
-	"go.etcd.io/bbolt/internal/btesting"
 )
 
 func TestSimulate_1op_1p(t *testing.T)     { testSimulate(t, nil, 1, 1, 1) }

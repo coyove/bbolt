@@ -13,8 +13,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/coyove/bbolt/internal/btesting"
 	bolt "go.etcd.io/bbolt"
-	"go.etcd.io/bbolt/internal/btesting"
 )
 
 // TestTx_Check_ReadOnly tests consistency checking on a ReadOnly database.

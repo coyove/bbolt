@@ -9,8 +9,8 @@ import (
 
 	"golang.org/x/sys/unix"
 
+	"github.com/coyove/bbolt/internal/btesting"
 	bolt "go.etcd.io/bbolt"
-	"go.etcd.io/bbolt/internal/btesting"
 )
 
 func TestMlock_DbOpen(t *testing.T) {
