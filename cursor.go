@@ -371,7 +371,7 @@ func (c *Cursor) keyValue() ([]byte, []byte, uint32) {
 
 	// Or retrieve value from page.
 	elem := ref.page.leafPageElement(uint16(ref.index))
-	return elem.key(), elem.value(), elem.flags
+	return elem.key(), elem.value(), elem.flags()
 }
 
 // node returns the node that the cursor is currently positioned on.

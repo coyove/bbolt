@@ -123,23 +123,46 @@ func (n *branchPageElement) key() []byte {
 
 // leafPageElement represents a node on a leaf page.
 type leafPageElement struct {
-	flags uint32
-	pos   uint32
-	ksize uint32
-	vsize uint32
+	//  2: flags
+	// 16: pos
+	// 15: key
+	// 31: value
+	data uint64
+}
+
+func (n *leafPageElement) flags() uint32 {
+	return uint32(n.data >> 62)
+}
+
+func (n *leafPageElement) pos() uint32 {
+	return uint32(n.data>>46) & 0xFFFF
+}
+
+func (n *leafPageElement) ksize() uint32 {
+	return uint32(n.data>>31) & 0x7FFF
+}
+
+func (n *leafPageElement) vsize() uint32 {
+	return uint32(n.data) & 0x7FFFFFFF
+}
+
+func (n *leafPageElement) fill(flags uint32, pos uintptr, ksize, vsize int) *leafPageElement {
+	_assert(pos <= 0xFFFF, "impossible page offset: %d", pos)
+	n.data = uint64(flags)<<62 | uint64(pos)<<46 | uint64(ksize)<<31 | uint64(vsize)
+	return n
 }
 
 // key returns a byte slice of the node key.
 func (n *leafPageElement) key() []byte {
-	i := int(n.pos)
-	j := i + int(n.ksize)
+	i := int(n.pos())
+	j := i + int(n.ksize())
 	return unsafeByteSlice(unsafe.Pointer(n), 0, i, j)
 }
 
 // value returns a byte slice of the node value.
 func (n *leafPageElement) value() []byte {
-	i := int(n.pos) + int(n.ksize)
-	j := i + int(n.vsize)
+	i := int(n.pos()) + int(n.ksize())
+	j := i + int(n.vsize())
 	return unsafeByteSlice(unsafe.Pointer(n), 0, i, j)
 }
 

@@ -167,7 +167,7 @@ func (n *node) read(p *page) {
 		inode := &n.inodes[i]
 		if n.isLeaf {
 			elem := p.leafPageElement(uint16(i))
-			inode.flags = elem.flags
+			inode.flags = elem.flags()
 			inode.key = elem.key()
 			inode.value = elem.value()
 		} else {
@@ -225,10 +225,7 @@ func (n *node) write(p *page) {
 		// Write the page element.
 		if n.isLeaf {
 			elem := p.leafPageElement(uint16(i))
-			elem.pos = uint32(uintptr(unsafe.Pointer(&b[0])) - uintptr(unsafe.Pointer(elem)))
-			elem.flags = item.flags
-			elem.ksize = uint32(len(item.key))
-			elem.vsize = uint32(len(item.value))
+			elem.fill(item.flags, uintptr(unsafe.Pointer(&b[0]))-uintptr(unsafe.Pointer(elem)), len(item.key), len(item.value))
 		} else {
 			elem := p.branchPageElement(uint16(i))
 			elem.pos = uint32(uintptr(unsafe.Pointer(&b[0])) - uintptr(unsafe.Pointer(elem)))

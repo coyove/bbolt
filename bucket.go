@@ -8,7 +8,7 @@ import (
 
 const (
 	// MaxKeySize is the maximum length of a key, in bytes.
-	MaxKeySize = 32768
+	MaxKeySize = 32768 - 1
 
 	// MaxValueSize is the maximum length of a value, in bytes.
 	MaxValueSize = (1 << 31) - 2
@@ -433,7 +433,7 @@ func (b *Bucket) Stats() BucketStats {
 				// of all previous elements' keys and values.
 				// It also includes the last element's header.
 				lastElement := p.leafPageElement(p.count - 1)
-				used += uintptr(lastElement.pos + lastElement.ksize + lastElement.vsize)
+				used += uintptr(lastElement.pos() + lastElement.ksize() + lastElement.vsize())
 			}
 
 			if b.root == 0 {
@@ -450,7 +450,7 @@ func (b *Bucket) Stats() BucketStats {
 				// looking for the ones with the bucketLeafFlag.
 				for i := uint16(0); i < p.count; i++ {
 					e := p.leafPageElement(i)
-					if (e.flags & bucketLeafFlag) != 0 {
+					if (e.flags() & bucketLeafFlag) != 0 {
 						// For any bucket element, open the element value
 						// and recursively call Stats on the contained bucket.
 						subStats.Add(b.openBucket(e.value()).Stats())

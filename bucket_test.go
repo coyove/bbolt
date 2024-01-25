@@ -1636,16 +1636,16 @@ func TestBucket_Stats_Large(t *testing.T) {
 
 	pageSize2stats := map[int]bolt.BucketStats{
 		4096: {
-			BranchPageN:       13,
+			BranchPageN:       9,
 			BranchOverflowN:   0,
-			LeafPageN:         1196,
+			LeafPageN:         858,
 			LeafOverflowN:     0,
 			KeyN:              100000,
 			Depth:             3,
-			BranchAlloc:       53248,
-			BranchInuse:       25257,
-			LeafAlloc:         4898816,
-			LeafInuse:         2596916,
+			BranchAlloc:       36864,
+			BranchInuse:       18193,
+			LeafAlloc:         3514368,
+			LeafInuse:         1791508,
 			BucketN:           1,
 			InlineBucketN:     0,
 			InlineBucketInuse: 0},
