@@ -9,7 +9,9 @@ bbolt
 [![LICENSE](https://img.shields.io/github/license/etcd-io/bbolt.svg?style=flat-square)](https://github.com/etcd-io/bbolt/blob/master/LICENSE)
 
 This is my own fork of bbolt v1.3.8, which optimized the internal layout of the
-database, producing files 30-50% smaller than the original implementation.
+database, producing files 30-50% smaller than the original implementation for
+small keys and values.
+=====
 
 WARNING: the new format is NOT binary compatible.
 
