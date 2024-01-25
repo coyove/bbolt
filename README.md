@@ -11,9 +11,11 @@ bbolt
 ## Note
 This is my own fork of bbolt v1.3.8, which optimized the internal layout of the
 database, producing files 30-50% smaller than the original implementation for
-small keys (<8K) and values (<24M).
+small keys and values.
 
-WARNING: the new format is NOT binary compatible.
+Max key size is 8K and max value size is 16M.
+
+WARNING: this fork is NOT binary compatible. 
 =====
 
 bbolt is a fork of [Ben Johnson's][gh_ben] [Bolt][bolt] key/value
