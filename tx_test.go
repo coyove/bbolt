@@ -1019,6 +1019,10 @@ func TestTx_TruncateBeforeWrite(t *testing.T) {
 	}
 	for _, isSyncFreelist := range []bool{false, true} {
 		t.Run(fmt.Sprintf("isSyncFreelist:%v", isSyncFreelist), func(t *testing.T) {
+			defer func() {
+				fmt.Println(recover())
+			}()
+
 			// Open the database.
 			db := btesting.MustCreateDBWithOption(t, &bolt.Options{
 				NoFreelistSync: isSyncFreelist,

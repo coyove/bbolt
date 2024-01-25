@@ -8,10 +8,10 @@ import (
 
 const (
 	// MaxKeySize is the maximum length of a key, in bytes.
-	MaxKeySize = 32768 - 1
+	MaxKeySize = 8191
 
 	// MaxValueSize is the maximum length of a value, in bytes.
-	MaxValueSize = (1 << 31) - 2
+	MaxValueSize = 16777215
 )
 
 const bucketHeaderSize = int(unsafe.Sizeof(bucket{}))

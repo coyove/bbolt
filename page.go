@@ -123,32 +123,32 @@ func (n *branchPageElement) key() []byte {
 
 // leafPageElement represents a node on a leaf page.
 type leafPageElement struct {
-	//  2: flags
-	// 16: pos
-	// 15: key
-	// 31: value
+	//  1: flags
+	// 26: pos
+	// 13: key
+	// 24: value
 	data uint64
 }
 
 func (n *leafPageElement) flags() uint32 {
-	return uint32(n.data >> 62)
+	return uint32(n.data >> 63)
 }
 
 func (n *leafPageElement) pos() uint32 {
-	return uint32(n.data>>46) & 0xFFFF
+	return uint32(n.data>>37) & 0x3FFFFFF
 }
 
 func (n *leafPageElement) ksize() uint32 {
-	return uint32(n.data>>31) & 0x7FFF
+	return uint32(n.data>>24) & 0x1FFF
 }
 
 func (n *leafPageElement) vsize() uint32 {
-	return uint32(n.data) & 0x7FFFFFFF
+	return uint32(n.data) & 0xFFFFFF
 }
 
 func (n *leafPageElement) fill(flags uint32, pos uintptr, ksize, vsize int) *leafPageElement {
-	_assert(pos <= 0xFFFF, "impossible page offset: %d", pos)
-	n.data = uint64(flags)<<62 | uint64(pos)<<46 | uint64(ksize)<<31 | uint64(vsize)
+	_assert(pos <= 0x3FFFFFF, "impossible page offset: %d", pos)
+	n.data = uint64(flags)<<63 | uint64(pos)<<37 | uint64(ksize)<<24 | uint64(vsize)
 	return n
 }
 

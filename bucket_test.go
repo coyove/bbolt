@@ -179,7 +179,7 @@ func TestBucket_Put_Large(t *testing.T) {
 			t.Fatal(err)
 		}
 		for i := 1; i < count; i++ {
-			if err := b.Put([]byte(strings.Repeat("0", i*factor)), []byte(strings.Repeat("X", (count-i)*factor))); err != nil {
+			if err := b.Put([]byte(strings.Repeat("0", i)), []byte(strings.Repeat("X", (count-i)*factor))); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -191,7 +191,7 @@ func TestBucket_Put_Large(t *testing.T) {
 	if err := db.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte("widgets"))
 		for i := 1; i < count; i++ {
-			value := b.Get([]byte(strings.Repeat("0", i*factor)))
+			value := b.Get([]byte(strings.Repeat("0", i)))
 			if !bytes.Equal(value, []byte(strings.Repeat("X", (count-i)*factor))) {
 				t.Fatalf("unexpected value: %v", value)
 			}
@@ -1265,16 +1265,16 @@ func TestBucket_Stats(t *testing.T) {
 		4096: {
 			BranchPageN:     1,
 			BranchOverflowN: 0,
-			LeafPageN:       7,
+			LeafPageN:       5,
 			LeafOverflowN:   10,
 			KeyN:            501,
 			Depth:           2,
 			BranchAlloc:     4096,
-			BranchInuse:     149,
-			LeafAlloc:       69632,
+			BranchInuse:     111,
+			LeafAlloc:       61440,
 			LeafInuse: 0 +
-				7*16 + // leaf page header (x LeafPageN)
-				501*16 + // leaf elements
+				5*16 + // leaf page header (x LeafPageN)
+				501*8 + // leaf elements
 				500*3 + len(bigKey) + // leaf keys
 				1*10 + 2*90 + 3*400 + longKeyLength, // leaf values: 10 * 1digit, 90*2digits, ...
 			BucketN:           1,
@@ -1292,7 +1292,7 @@ func TestBucket_Stats(t *testing.T) {
 			LeafAlloc:       212992,
 			LeafInuse: 0 +
 				3*16 + // leaf page header (x LeafPageN)
-				501*16 + // leaf elements
+				501*8 + // leaf elements
 				500*3 + len(bigKey) + // leaf keys
 				1*10 + 2*90 + 3*400 + longKeyLength, // leaf values: 10 * 1digit, 90*2digits, ...
 			BucketN:           1,
@@ -1356,23 +1356,23 @@ func TestBucket_Stats_RandomFill(t *testing.T) {
 			t.Fatalf("unexpected KeyN: %d", stats.KeyN)
 		}
 
-		if stats.BranchPageN != 98 {
+		if stats.BranchPageN != 84 {
 			t.Fatalf("unexpected BranchPageN: %d", stats.BranchPageN)
 		} else if stats.BranchOverflowN != 0 {
 			t.Fatalf("unexpected BranchOverflowN: %d", stats.BranchOverflowN)
-		} else if stats.BranchInuse != 130984 {
+		} else if stats.BranchInuse != 106397 {
 			t.Fatalf("unexpected BranchInuse: %d", stats.BranchInuse)
-		} else if stats.BranchAlloc != 401408 {
+		} else if stats.BranchAlloc != 344064 {
 			t.Fatalf("unexpected BranchAlloc: %d", stats.BranchAlloc)
 		}
 
-		if stats.LeafPageN != 3412 {
+		if stats.LeafPageN != 2765 {
 			t.Fatalf("unexpected LeafPageN: %d", stats.LeafPageN)
 		} else if stats.LeafOverflowN != 0 {
 			t.Fatalf("unexpected LeafOverflowN: %d", stats.LeafOverflowN)
-		} else if stats.LeafInuse != 4742482 {
+		} else if stats.LeafInuse != 3932130 {
 			t.Fatalf("unexpected LeafInuse: %d", stats.LeafInuse)
-		} else if stats.LeafAlloc != 13975552 {
+		} else if stats.LeafAlloc != 11325440 {
 			t.Fatalf("unexpected LeafAlloc: %d", stats.LeafAlloc)
 		}
 		return nil
@@ -1435,7 +1435,7 @@ func TestBucket_Stats_Small(t *testing.T) {
 			t.Fatalf("unexpected BucketN: %d", stats.BucketN)
 		} else if stats.InlineBucketN != 1 {
 			t.Fatalf("unexpected InlineBucketN: %d", stats.InlineBucketN)
-		} else if stats.InlineBucketInuse != 16+16+6 {
+		} else if stats.InlineBucketInuse != 30 {
 			t.Fatalf("unexpected InlineBucketInuse: %d", stats.InlineBucketInuse)
 		}
 
@@ -1565,17 +1565,17 @@ func TestBucket_Stats_Nested(t *testing.T) {
 		}
 
 		foo := 16            // foo (pghdr)
-		foo += 101 * 16      // foo leaf elements
+		foo += 101 * 8       // foo leaf elements
 		foo += 100*2 + 100*2 // foo leaf key/values
 		foo += 3 + 16        // foo -> bar key/value
 
 		bar := 16      // bar (pghdr)
-		bar += 11 * 16 // bar leaf elements
+		bar += 11 * 8  // bar leaf elements
 		bar += 10 + 10 // bar leaf key/values
 		bar += 3 + 16  // bar -> baz key/value
 
 		baz := 16      // baz (inline) (pghdr)
-		baz += 10 * 16 // baz leaf elements
+		baz += 10 * 8  // baz leaf elements
 		baz += 10 + 10 // baz leaf key/values
 
 		if stats.LeafInuse != foo+bar+baz {
