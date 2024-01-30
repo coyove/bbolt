@@ -110,6 +110,17 @@ func (c *Cursor) Prev() (key []byte, value []byte) {
 	return k, v
 }
 
+// PrevSamePage behaves similar to Prev, but only returns the previous key and value if they
+// are in the same page (no stack switching).
+func (c *Cursor) PrevSamePage() (key []byte, value []byte, ok bool) {
+	_assert(c.bucket.tx.db != nil, "tx closed")
+	k, v, flags, ok := c.prevSamePage()
+	if (flags & uint32(bucketLeafFlag)) != 0 {
+		return k, nil, ok
+	}
+	return k, v, ok
+}
+
 // Seek moves the cursor to a given key using a b-tree search and returns it.
 // If the key does not exist then the next key is used. If no keys
 // follow, a nil key is returned.
@@ -265,6 +276,22 @@ func (c *Cursor) prev() (key []byte, value []byte, flags uint32) {
 	// Move down the stack to find the last element of the last leaf under this branch.
 	c.last()
 	return c.keyValue()
+}
+
+func (c *Cursor) prevSamePage() (key []byte, value []byte, flags uint32, ok bool) {
+	// Attempt to move back one element until we're successful.
+	// Don't move up the stack as we hit the beginning of each page in our stack.
+	for i := len(c.stack) - 1; i >= 0; i-- {
+		elem := &c.stack[i]
+		if elem.index > 0 {
+			elem.index--
+			ok = true
+			key, value, flags = c.keyValue()
+			return
+		}
+		break
+	}
+	return
 }
 
 // search recursively performs a binary search against a given page/node until it finds a given key.
