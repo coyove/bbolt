@@ -14,31 +14,31 @@ func (db *DB) Size() (sz int64) {
 	return
 }
 
-func (b *Bucket) TestDelete(key []byte) (bool, error) {
+func (b *Bucket) TestDelete(key []byte) ([]byte, error) {
 	if b.tx.db == nil {
-		return false, ErrTxClosed
+		return nil, ErrTxClosed
 	} else if !b.Writable() {
-		return false, ErrTxNotWritable
+		return nil, ErrTxNotWritable
 	}
 
 	// Move cursor to correct position.
 	c := b.Cursor()
-	k, _, flags := c.seek(key)
+	k, v, flags := c.seek(key)
 
 	// Return nil if the key doesn't exist.
 	if !bytes.Equal(key, k) {
-		return false, nil
+		return nil, nil
 	}
 
 	// Return an error if there is already existing bucket value.
 	if (flags & bucketLeafFlag) != 0 {
-		return false, ErrIncompatibleValue
+		return nil, ErrIncompatibleValue
 	}
 
 	// Delete the node if we have a matching key.
 	c.node().del(key)
 
-	return true, nil
+	return v, nil
 }
 
 func (b *Bucket) TestPut(key []byte, value []byte) (bool, error) {
