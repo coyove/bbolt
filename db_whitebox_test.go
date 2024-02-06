@@ -4,79 +4,24 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func TestOpenWithPreLoadFreelist(t *testing.T) {
-	testCases := []struct {
-		name                    string
-		readonly                bool
-		preLoadFreePage         bool
-		expectedFreePagesLoaded bool
-	}{
-		{
-			name:                    "write mode always load free pages",
-			readonly:                false,
-			preLoadFreePage:         false,
-			expectedFreePagesLoaded: true,
-		},
-		{
-			name:                    "readonly mode load free pages when flag set",
-			readonly:                true,
-			preLoadFreePage:         true,
-			expectedFreePagesLoaded: true,
-		},
-		{
-			name:                    "readonly mode doesn't load free pages when flag not set",
-			readonly:                true,
-			preLoadFreePage:         false,
-			expectedFreePagesLoaded: false,
-		},
-	}
-
-	fileName, err := prepareData(t)
-	require.NoError(t, err)
-
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			db, err := Open(fileName, 0666, &Options{
-				ReadOnly:        tc.readonly,
-				PreLoadFreelist: tc.preLoadFreePage,
-			})
-			require.NoError(t, err)
-
-			assert.Equal(t, tc.expectedFreePagesLoaded, db.freelist != nil)
-
-			assert.NoError(t, db.Close())
-		})
-	}
-}
-
 func TestMethodPage(t *testing.T) {
 	testCases := []struct {
-		name            string
-		readonly        bool
-		preLoadFreePage bool
-		expectedError   error
+		name          string
+		readonly      bool
+		expectedError error
 	}{
 		{
-			name:            "write mode",
-			readonly:        false,
-			preLoadFreePage: false,
-			expectedError:   nil,
+			name:          "write mode",
+			readonly:      false,
+			expectedError: nil,
 		},
 		{
-			name:            "readonly mode with preloading free pages",
-			readonly:        true,
-			preLoadFreePage: true,
-			expectedError:   nil,
-		},
-		{
-			name:            "readonly mode without preloading free pages",
-			readonly:        true,
-			preLoadFreePage: false,
-			expectedError:   ErrFreePagesNotLoaded,
+			name:          "readonly mode with preloading free pages",
+			readonly:      true,
+			expectedError: nil,
 		},
 	}
 
@@ -87,8 +32,7 @@ func TestMethodPage(t *testing.T) {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			db, err := Open(fileName, 0666, &Options{
-				ReadOnly:        tc.readonly,
-				PreLoadFreelist: tc.preLoadFreePage,
+				ReadOnly: tc.readonly,
 			})
 			require.NoError(t, err)
 			defer db.Close()

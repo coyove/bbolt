@@ -59,6 +59,7 @@ func (tx *Tx) init(db *DB) {
 	if tx.writable {
 		tx.pages = make(map[pgid]*page)
 		tx.meta.txid += txid(1)
+		tx.meta.flid++
 	}
 }
 
@@ -169,18 +170,13 @@ func (tx *Tx) Commit() error {
 	// Free the old root bucket.
 	tx.meta.root.root = tx.root.root
 
-	// Free the old freelist because commit writes out a fresh freelist.
-	if tx.meta.freelist != pgidNoFreelist {
-		tx.db.freelist.free(tx.meta.txid, tx.db.page(tx.meta.freelist))
-	}
+	// No need to free the old freelist because in coyove/bbolt fork freelists occupy a fixed region on disk.
+	// if tx.meta.freelist != pgidNoFreelist {
+	// 	tx.db.freelist.free(tx.meta.txid, tx.db.page(tx.meta.freelist))
+	// }
 
-	if !tx.db.NoFreelistSync {
-		err := tx.commitFreelist()
-		if err != nil {
-			return err
-		}
-	} else {
-		tx.meta.freelist = pgidNoFreelist
+	if err := tx.commitFreelist(); err != nil {
+		return err
 	}
 
 	// If the high water mark has moved up then attempt to grow the database.
@@ -233,19 +229,27 @@ func (tx *Tx) Commit() error {
 }
 
 func (tx *Tx) commitFreelist() error {
-	// Allocate new pages for the new free list. This will overestimate
-	// the size of the freelist but not underestimate the size (which would be bad).
-	p, err := tx.allocate((tx.db.freelist.size() / tx.db.pageSize) + 1)
-	if err != nil {
-		tx.rollback()
-		return err
+	_assert(tx.db.freelist.size() < freelistRegionSize-tx.db.pageSize, "fatal: freelist too large")
+
+	var buf []byte
+	var pages int
+	if size := tx.db.freelist.size(); size < tx.db.pageSize {
+		pages = 1
+		buf = tx.db.pagePool.Get().([]byte)
+	} else {
+		pages = size/tx.db.pageSize + 1
+		buf = make([]byte, pages*tx.db.pageSize)
 	}
+	p := (*page)(unsafe.Pointer(&buf[0]))
+	p.id = 2 + (tx.meta.flid%2)*freelistRegionSize/pgid(tx.db.pageSize)
+	p.overflow = uint32(pages) - 1
+
 	if err := tx.db.freelist.write(p); err != nil {
 		tx.rollback()
 		return err
 	}
-	tx.meta.freelist = p.id
 
+	tx.pages[p.id] = p
 	return nil
 }
 
@@ -281,14 +285,8 @@ func (tx *Tx) rollback() {
 		// When mmap fails, the `data`, `dataref` and `datasz` may be reset to
 		// zero values, and there is no way to reload free page IDs in this case.
 		if tx.db.data != nil {
-			if !tx.db.hasSyncedFreelist() {
-				// Reconstruct free page list by scanning the DB to get the whole free page list.
-				// Note: scaning the whole db is heavy if your db size is large in NoSyncFreeList mode.
-				tx.db.freelist.noSyncReload(tx.db.freepages())
-			} else {
-				// Read free page list from freelist page.
-				tx.db.freelist.reload(tx.db.page(tx.db.meta().freelist))
-			}
+			// Read free page list from freelist page.
+			tx.db.freelist.reload(tx.db.freelistPage())
 		}
 	}
 	tx.close()
@@ -368,6 +366,7 @@ func (tx *Tx) WriteTo(w io.Writer) (n int64, err error) {
 	// Write meta 1 with a lower transaction id.
 	page.id = 1
 	page.meta().txid -= 1
+	page.meta().flid -= 1
 	page.meta().checksum = page.meta().sum64()
 	nn, err = w.Write(buf)
 	n += int64(nn)

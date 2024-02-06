@@ -51,10 +51,9 @@ func (tx *Tx) check(kvStringer KVStringer, ch chan error) {
 	reachable := make(map[pgid]*page)
 	reachable[0] = tx.page(0) // meta0
 	reachable[1] = tx.page(1) // meta1
-	if tx.meta.freelist != pgidNoFreelist {
-		for i := uint32(0); i <= tx.page(tx.meta.freelist).overflow; i++ {
-			reachable[tx.meta.freelist+pgid(i)] = tx.page(tx.meta.freelist)
-		}
+	for i := uint32(2); i < 2+freelistRegionSize*2/uint32(tx.db.pageSize); i++ {
+		// Hack here.
+		reachable[pgid(i)] = nil // tx.page(pgid(i))
 	}
 
 	// Recursively check buckets.

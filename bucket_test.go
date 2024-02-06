@@ -16,8 +16,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	bolt "github.com/coyove/bbolt"
 	"github.com/coyove/bbolt/internal/btesting"
-	bolt "go.etcd.io/bbolt"
 )
 
 // Ensure that a bucket that gets a non-existent key returns nil.
@@ -402,6 +402,8 @@ func TestBucket_Delete_FreelistOverflow(t *testing.T) {
 		}
 	}
 
+	fmt.Println("size is", db.Size())
+
 	// Delete all of them in one large transaction
 	if err := db.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte("0"))
@@ -415,6 +417,8 @@ func TestBucket_Delete_FreelistOverflow(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+
+	fmt.Println("size after deletion is", db.Size())
 
 	// Check more than an overflow's worth of pages are freed.
 	stats := db.Stats()

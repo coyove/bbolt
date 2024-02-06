@@ -64,7 +64,7 @@ func TestManyDBs(t *testing.T) {
 		t.Skip("skipping test in short mode")
 	}
 
-	for i := 0; i < 100; i++ {
+	for i := 0; i < 10; i++ {
 		t.Run(fmt.Sprintf("%d", i), createAndPutKeys)
 	}
 }

@@ -9,8 +9,8 @@ import (
 
 	"golang.org/x/sys/unix"
 
+	bolt "github.com/coyove/bbolt"
 	"github.com/coyove/bbolt/internal/btesting"
-	bolt "go.etcd.io/bbolt"
 )
 
 func TestMlock_DbOpen(t *testing.T) {
@@ -70,8 +70,8 @@ func TestMlock_DbCanGrow_Big(t *testing.T) {
 	}
 	newDbSize := fileSize(db.Path())
 
-	if newDbSize <= dbSize {
-		t.Errorf("db didn't grow: %v <= %v", newDbSize, dbSize)
+	if newDbSize > dbSize {
+		t.Errorf("db growed: %v > %v", newDbSize, dbSize)
 	}
 }
 

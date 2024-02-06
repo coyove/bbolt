@@ -11,8 +11,8 @@ import (
 	"testing"
 	"testing/quick"
 
+	bolt "github.com/coyove/bbolt"
 	"github.com/coyove/bbolt/internal/btesting"
-	bolt "go.etcd.io/bbolt"
 )
 
 // Ensure that a cursor can return a reference to the bucket that created it.
