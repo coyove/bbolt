@@ -3,7 +3,10 @@ package bbolt
 import (
 	"bytes"
 	"fmt"
+	"math"
+	"math/big"
 	"sort"
+	"time"
 )
 
 // Cursor represents an iterator that can traverse over all key/value pairs in a bucket
@@ -276,6 +279,101 @@ func (c *Cursor) prev() (key []byte, value []byte, flags uint32) {
 	// Move down the stack to find the last element of the last leaf under this branch.
 	c.last()
 	return c.keyValue()
+}
+
+func (c *Cursor) Distance(start, end []byte) int {
+	_assert(c.bucket.tx.db != nil, "tx closed")
+	dist, _ := c.distanceTimeout(start, end, 0)
+	return dist
+}
+
+func (c *Cursor) EstimatedDistance(start, end []byte, timeout time.Duration) (int, bool) {
+	_assert(c.bucket.tx.db != nil, "tx closed")
+	return c.distanceTimeout(start, end, timeout)
+}
+
+func (c *Cursor) distanceTimeout(start, end []byte, timeout time.Duration) (int, bool) {
+	if bytes.Compare(start, end) > 0 {
+		start, end = end, start
+	}
+
+	if bytes.Equal(start, end) {
+		return 0, true
+	}
+
+	if k, _, _ := c.seek(end); len(k) == 0 {
+		c.last()
+	}
+
+	getKeyRange := func(ref *elemRef) ([]byte, []byte, int) {
+		if ref.node != nil {
+			return ref.node.inodes[0].key, ref.node.inodes[len(ref.node.inodes)-1].key, len(ref.node.inodes)
+		}
+
+		return ref.page.leafPageElement(0).key(), ref.page.leafPageElement(ref.page.count - 1).key(), int(ref.page.count)
+	}
+
+	ref := &c.stack[len(c.stack)-1]
+	dist := ref.index
+	start0, end0, count := getKeyRange(ref)
+
+	for ddl := time.Now().Add(timeout); timeout == 0 || time.Now().Before(ddl); {
+		if bytes.Compare(start0, start) <= 0 && bytes.Compare(start, end0) <= 0 {
+			if ref.node != nil {
+				for i, inode := range ref.node.inodes {
+					if bytes.Compare(inode.key, start) >= 0 {
+						return dist - i, true
+					}
+				}
+			} else {
+				for i := 0; i < int(ref.page.count); i++ {
+					if bytes.Compare(ref.page.leafPageElement(uint16(i)).key(), start) >= 0 {
+						return dist - i, true
+					}
+				}
+			}
+			panic("BUG: exhausted distance counting")
+		}
+
+		for {
+			c.stack = c.stack[:len(c.stack)-1]
+			if len(c.stack) == 0 {
+				return dist, true
+			}
+			ref := &c.stack[len(c.stack)-1]
+			if ref.index > 0 {
+				ref.index--
+				break
+			}
+		}
+
+		c.last()
+
+		ref = &c.stack[len(c.stack)-1]
+		start0, end0, count = getKeyRange(ref)
+		dist += count
+	}
+
+	// Timed out, let's estimate the distance by using (start, start0, end).
+	ln := int(math.Max(float64(len(end)), math.Max(float64(len(start)), float64(len(start0)))))
+	for len(start) < ln {
+		start = append(start, 0)
+	}
+	for len(start0) < ln {
+		start0 = append(start0, 0)
+	}
+	for len(end) < ln {
+		end = append(end, 0)
+	}
+
+	startNum := (&big.Int{}).SetBytes(start)
+	start0Num := (&big.Int{}).SetBytes(start0)
+	endNum := (&big.Int{}).SetBytes(end)
+
+	d := big.NewInt(int64(dist))
+	d.Mul(d, (&big.Int{}).Sub(endNum, startNum))
+	d.Div(d, (&big.Int{}).Sub(endNum, start0Num))
+	return int(d.Int64()), false
 }
 
 func (c *Cursor) prevSamePage() (key []byte, value []byte, flags uint32, ok bool) {

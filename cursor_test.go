@@ -5,6 +5,8 @@ import (
 	"encoding/binary"
 	"fmt"
 	"log"
+	"math"
+	"math/rand"
 	"os"
 	"reflect"
 	"sort"
@@ -735,6 +737,62 @@ func TestCursor_QuickCheck_BucketsOnly_Reverse(t *testing.T) {
 		if !reflect.DeepEqual(names, []string{"foo", "baz", "bar"}) {
 			t.Fatalf("unexpected names: %+v", names)
 		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCursor_Distance(t *testing.T) {
+	rand.Seed(int64(qseed))
+	db := btesting.MustCreateDB(t)
+
+	N := 1000
+	if err := db.Update(func(tx *bolt.Tx) error {
+		b, err := tx.CreateBucket([]byte("distance"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for i := 0; i < N; i++ {
+			if err := b.Put(fmt.Appendf(nil, "%04x", i), make([]byte, rand.Intn(32)+32)); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := db.View(func(tx *bolt.Tx) error {
+		c := tx.Bucket([]byte("distance")).Cursor()
+
+		for i := 0; i < N; i++ {
+			for j := 0; j < N; j++ {
+				dist := int(math.Abs(float64(i - j)))
+				if d := c.Distance(fmt.Appendf(nil, "%04x", i), fmt.Appendf(nil, "%04x", j)); d != dist {
+					t.Fatalf("cursor distance: expected %d, got %d", dist, d)
+				}
+			}
+		}
+
+		for j := 0; j < N; j++ {
+			key := fmt.Appendf(nil, "%04x", j)
+			dist := j
+			if d := c.Distance(nil, key); d != dist {
+				t.Fatalf("cursor distance: expected %d, got %d", dist, d)
+			}
+
+			dist = N - j
+			if d := c.Distance(key, []byte{0xff}); d != dist {
+				t.Fatalf("cursor distance: expected %d, got %d", dist, d)
+			}
+
+			_, exact := c.EstimatedDistance(key, []byte{0xff}, 1)
+			if exact {
+				t.Fatal("not exact")
+			}
+		}
+
 		return nil
 	}); err != nil {
 		t.Fatal(err)
