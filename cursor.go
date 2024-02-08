@@ -6,7 +6,6 @@ import (
 	"math"
 	"math/big"
 	"sort"
-	"time"
 )
 
 // Cursor represents an iterator that can traverse over all key/value pairs in a bucket
@@ -283,16 +282,16 @@ func (c *Cursor) prev() (key []byte, value []byte, flags uint32) {
 
 func (c *Cursor) Distance(start, end []byte) int {
 	_assert(c.bucket.tx.db != nil, "tx closed")
-	dist, _ := c.distanceTimeout(start, end, 0)
+	dist, _ := c.distanceLimit(start, end, 0)
 	return dist
 }
 
-func (c *Cursor) EstimatedDistance(start, end []byte, timeout time.Duration) (int, bool) {
+func (c *Cursor) EstimatedDistance(start, end []byte, giveup int) (int, bool) {
 	_assert(c.bucket.tx.db != nil, "tx closed")
-	return c.distanceTimeout(start, end, timeout)
+	return c.distanceLimit(start, end, giveup)
 }
 
-func (c *Cursor) distanceTimeout(start, end []byte, timeout time.Duration) (int, bool) {
+func (c *Cursor) distanceLimit(start, end []byte, giveup int) (int, bool) {
 	if bytes.Compare(start, end) > 0 {
 		start, end = end, start
 	}
@@ -301,7 +300,11 @@ func (c *Cursor) distanceTimeout(start, end []byte, timeout time.Duration) (int,
 		return 0, true
 	}
 
-	if k, _, _ := c.seek(end); len(k) == 0 {
+	k, _, _ := c.seek(end)
+	if ref := &c.stack[len(c.stack)-1]; ref.index >= ref.count() {
+		k, _, _ = c.next()
+	}
+	if len(k) == 0 {
 		c.last()
 	}
 
@@ -317,7 +320,12 @@ func (c *Cursor) distanceTimeout(start, end []byte, timeout time.Duration) (int,
 	dist := ref.index
 	start0, end0, count := getKeyRange(ref)
 
-	for ddl := time.Now().Add(timeout); timeout == 0 || time.Now().Before(ddl); {
+	for giveup == 0 || dist < giveup {
+		// fmt.Println(ref.index, ref.count(), string(start0), string(start), string(end0))
+		if bytes.Compare(start, end0) > 0 {
+			dist -= count
+			return dist, true
+		}
 		if bytes.Compare(start0, start) <= 0 && bytes.Compare(start, end0) <= 0 {
 			if ref.node != nil {
 				for i, inode := range ref.node.inodes {

@@ -766,10 +766,28 @@ func TestCursor_Distance(t *testing.T) {
 	if err := db.View(func(tx *bolt.Tx) error {
 		c := tx.Bucket([]byte("distance")).Cursor()
 
+		if d := c.Distance(nil, []byte{1}); d != 0 {
+			t.Fatalf("cursor distance before first: expected %d, got %d", 0, d)
+		}
+
 		for i := 0; i < N; i++ {
+			if d := c.Distance(fmt.Appendf(nil, "%04xa", i), fmt.Appendf(nil, "%04xb", i)); d != 0 {
+				t.Fatalf("cursor distance (%d) after last: expected %d, got %d", i, 0, d)
+			}
+			if i > 0 {
+				if d := c.Distance(fmt.Appendf(nil, "%04xa", i-1), fmt.Appendf(nil, "%04xb", i)); d != 1 {
+					t.Fatalf("cursor distance (%d) off by 1: expected %d, got %d", i, 1, d)
+				}
+			}
 			for j := 0; j < N; j++ {
 				dist := int(math.Abs(float64(i - j)))
 				if d := c.Distance(fmt.Appendf(nil, "%04x", i), fmt.Appendf(nil, "%04x", j)); d != dist {
+					t.Fatalf("cursor distance: expected %d, got %d", dist, d)
+				}
+			}
+			for j := i; j < N; j++ {
+				dist := j - i + 1
+				if d := c.Distance(fmt.Appendf(nil, "%04x", i), fmt.Appendf(nil, "%04x~", j)); d != dist {
 					t.Fatalf("cursor distance: expected %d, got %d", dist, d)
 				}
 			}
@@ -782,8 +800,18 @@ func TestCursor_Distance(t *testing.T) {
 				t.Fatalf("cursor distance: expected %d, got %d", dist, d)
 			}
 
+			dist = j + 1
+			if d := c.Distance(nil, append(key, 1)); d != dist {
+				t.Fatalf("cursor distance: expected %d, got %d", dist, d)
+			}
+
 			dist = N - j
 			if d := c.Distance(key, []byte{0xff}); d != dist {
+				t.Fatalf("cursor distance: expected %d, got %d", dist, d)
+			}
+
+			dist = N - j - 1
+			if d := c.Distance(append(key, 1), []byte{0xff}); d != dist {
 				t.Fatalf("cursor distance: expected %d, got %d", dist, d)
 			}
 
