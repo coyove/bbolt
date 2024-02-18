@@ -310,6 +310,7 @@ func (tx *Tx) close() {
 		tx.db.statlock.Lock()
 		tx.db.stats.FreePageN = freelistFreeN
 		tx.db.stats.PendingPageN = freelistPendingN
+		tx.db.stats.PendingN = len(tx.db.freelist.pending)
 		tx.db.stats.FreeAlloc = (freelistFreeN + freelistPendingN) * tx.db.pageSize
 		tx.db.stats.FreelistInuse = freelistAlloc
 		tx.db.stats.TxStats.add(&tx.stats)

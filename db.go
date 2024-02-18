@@ -1223,6 +1223,7 @@ type Stats struct {
 	// Freelist stats
 	FreePageN     int // total number of free pages on the freelist
 	PendingPageN  int // total number of pending pages on the freelist
+	PendingN      int // total number of pending pages on the freelist
 	FreeAlloc     int // total bytes allocated in free pages
 	FreelistInuse int // total bytes used by the freelist
 
