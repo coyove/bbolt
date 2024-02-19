@@ -24,7 +24,9 @@ const magic uint32 = 0xED0CDACD
 
 const pgidNoFreelist pgid = 0xffffffffffffffff
 
-const freelistRegionSize = 8 * 1024 * 1024
+const freelistMaxSize = 1 * 1024 * 1024
+
+const freelistRegionSize = 8 * freelistMaxSize
 
 // IgnoreNoSync specifies whether the NoSync field of a DB is ignored when
 // syncing changes to a file.  This is required as some operating systems,
@@ -129,6 +131,8 @@ type DB struct {
 	// Supported only on Unix via mlock/munlock syscalls.
 	Mlock bool
 
+	HardLimitPendingPages int
+
 	path     string
 	openFile func(string, int, os.FileMode) (*os.File, error)
 	file     *os.File
@@ -204,6 +208,7 @@ func Open(path string, mode os.FileMode, options *Options) (*DB, error) {
 	db.MaxBatchSize = DefaultMaxBatchSize
 	db.MaxBatchDelay = DefaultMaxBatchDelay
 	db.AllocSize = DefaultAllocSize
+	db.HardLimitPendingPages = freelistMaxSize / 2
 
 	flag := os.O_RDWR
 	if options.ReadOnly {
@@ -748,6 +753,12 @@ func (db *DB) beginRWTx() (*Tx, error) {
 	// This enforces only one writer transaction at a time.
 	db.rwlock.Lock()
 
+	// If we are having a lot of pending pages, return a temporary error (caller can retry later).
+	if stats := db.Stats(); stats.FreePageN+stats.PendingPageN > db.HardLimitPendingPages {
+		db.rwlock.Unlock()
+		return nil, ErrHighLoadPendingPages
+	}
+
 	// Once we have the writer lock then we can lock the meta pages so that
 	// we can set up the transaction.
 	db.metalock.Lock()
@@ -1223,7 +1234,7 @@ type Stats struct {
 	// Freelist stats
 	FreePageN     int // total number of free pages on the freelist
 	PendingPageN  int // total number of pending pages on the freelist
-	PendingN      int // total number of pending pages on the freelist
+	PendingN      int // total number of pending transactions
 	FreeAlloc     int // total bytes allocated in free pages
 	FreelistInuse int // total bytes used by the freelist
 

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math"
 	"math/rand"
 	"os"
 	"strconv"
@@ -199,6 +200,55 @@ func TestBucket_Put_Large(t *testing.T) {
 		return nil
 	}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// Really large values in single page.
+func TestBucket_Put_Large_SinglePage(t *testing.T) {
+	db := btesting.MustCreateDB(t)
+
+	if err := db.Update(func(tx *bolt.Tx) error {
+		b, err := tx.CreateBucket([]byte("widgets"))
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		for i := 0; i < 4; i++ {
+			key := make([]byte, bolt.MaxKeySize)
+			value := make([]byte, bolt.MaxValueSize)
+			key[0] = byte(i)
+			value[0] = byte(i)
+			if err := b.Put(key, value); err != nil {
+				t.Fatal(err)
+			}
+		}
+
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte("widgets"))
+
+		for i := 0; i < 4; i++ {
+			key := make([]byte, bolt.MaxKeySize)
+			key[0] = byte(i)
+			old := b.Get(key)
+			if len(old) != bolt.MaxValueSize || old[0] != key[0] {
+				t.Fatalf("incorrect value %d and %d", i, old[0])
+			}
+		}
+
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	pages := int64(math.Ceil((float64(bolt.MaxKeySize+bolt.MaxValueSize)*4 + pageHeaderSize) / 4096)) // leaf data
+	pages++                                                                                           // meta
+	if p := db.Stats().TxStats.PageCount; pages != p {
+		t.Fatalf("incorrect pages %d and %d", pages, p)
 	}
 }
 

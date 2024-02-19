@@ -116,6 +116,7 @@ func (db *DB) MustReopen() {
 
 // MustCheck runs a consistency check on the database and panics if any errors are found.
 func (db *DB) MustCheck() {
+	db.HardLimitPendingPages = 1e8
 	err := db.Update(func(tx *bolt.Tx) error {
 		// Collect all the errors.
 		var errors []error

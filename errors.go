@@ -48,6 +48,11 @@ var (
 	// ErrFreePagesNotLoaded is returned when a readonly transaction without
 	// preloading the free pages is trying to access the free pages.
 	ErrFreePagesNotLoaded = errors.New("free pages are not pre-loaded")
+
+	// ErrHighLoadPendingPages is returned when a long readonly transaction is currently
+	// running, which holds a large number of pending free pages waiting to be
+	// released. At this time, no more write transactions can take place.
+	ErrHighLoadPendingPages = errors.New("too many pending pages")
 )
 
 // These errors can occur when putting or deleting a value or a bucket.

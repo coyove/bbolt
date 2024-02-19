@@ -1327,6 +1327,37 @@ func TestDBUnmap(t *testing.T) {
 	db.DB = nil
 }
 
+func TestDB_HardLimitPendingPages(t *testing.T) {
+	db := btesting.MustCreateDB(t)
+
+	var max int
+	for i := 0; i < 5; i++ {
+		stats := db.Stats()
+		tot := stats.FreePageN + stats.PendingPageN
+		if tot > max {
+			max = tot
+		}
+
+		err := db.Update(func(tx *bolt.Tx) error {
+			b, _ := tx.CreateBucketIfNotExists([]byte("widgets"))
+			for i := 0; i < 100; i++ {
+				if err := b.Put(randKey(), randValue()); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	db.HardLimitPendingPages = max / 2
+	if db.Update(nil) != bolt.ErrHighLoadPendingPages {
+		t.Fatal("should be too many pending pages")
+	}
+}
+
 func ExampleDB_Update() {
 	// Open the database.
 	db, err := bolt.Open(tempfile(), 0666, nil)
