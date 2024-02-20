@@ -117,9 +117,10 @@ func (db *DB) MustReopen() {
 // MustCheck runs a consistency check on the database and panics if any errors are found.
 func (db *DB) MustCheck() {
 	db.HardLimitPendingPages = 1e8
+	var errors []error
+
 	err := db.Update(func(tx *bolt.Tx) error {
 		// Collect all the errors.
-		var errors []error
 		for err := range tx.Check() {
 			errors = append(errors, err)
 			if len(errors) > 10 {
@@ -127,28 +128,28 @@ func (db *DB) MustCheck() {
 			}
 		}
 
-		// If errors occurred, copy the DB and print the errors.
-		if len(errors) > 0 {
-			var path = filepath.Join(db.t.TempDir(), "db.backup")
-			err := tx.CopyFile(path, 0600)
-			require.NoError(db.t, err)
-
-			// Print errors.
-			fmt.Print("\n\n")
-			fmt.Printf("consistency check failed (%d errors)\n", len(errors))
-			for _, err := range errors {
-				fmt.Println(err)
-			}
-			fmt.Println("")
-			fmt.Println("db saved to:")
-			fmt.Println(path)
-			fmt.Print("\n\n")
-			os.Exit(-1)
-		}
-
 		return nil
 	})
 	require.NoError(db.t, err)
+
+	// If errors occurred, copy the DB and print the errors.
+	if len(errors) > 0 {
+		var path = filepath.Join(db.t.TempDir(), "db.backup")
+		err := db.CopyFile(path, 0600)
+		require.NoError(db.t, err)
+
+		// Print errors.
+		fmt.Print("\n\n")
+		fmt.Printf("consistency check failed (%d errors)\n", len(errors))
+		for _, err := range errors {
+			fmt.Println(err)
+		}
+		fmt.Println("")
+		fmt.Println("db saved to:")
+		fmt.Println(path)
+		fmt.Print("\n\n")
+		os.Exit(-1)
+	}
 }
 
 // Fill - fills the DB using numTx transactions and numKeysPerTx.
@@ -179,9 +180,7 @@ func (db *DB) Path() string {
 // CopyTempFile copies a database to a temporary file.
 func (db *DB) CopyTempFile() {
 	path := filepath.Join(db.t.TempDir(), "db.copy")
-	err := db.View(func(tx *bolt.Tx) error {
-		return tx.CopyFile(path, 0600)
-	})
+	err := db.CopyFile(path, 0600)
 	require.NoError(db.t, err)
 	fmt.Println("db copied to: ", path)
 }

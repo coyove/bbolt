@@ -539,9 +539,7 @@ func TestTx_CopyFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := db.View(func(tx *bolt.Tx) error {
-		return tx.CopyFile(path, 0600)
-	}); err != nil {
+	if err := db.CopyFile(path, 0600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -607,9 +605,7 @@ func TestTx_CopyFile_Error_Meta(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := db.View(func(tx *bolt.Tx) error {
-		return tx.Copy(&failWriter{})
-	}); err == nil || err.Error() != "meta 0 copy: error injected for tests" {
+	if err := db.Copy(&failWriter{}); err == nil || err.Error() != (failWriterError{}).Error() {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
@@ -633,9 +629,7 @@ func TestTx_CopyFile_Error_Normal(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := db.View(func(tx *bolt.Tx) error {
-		return tx.Copy(&failWriter{3 * db.Info().PageSize})
-	}); err == nil || err.Error() != "error injected for tests" {
+	if err := db.Copy(&failWriter{3 * db.Info().PageSize}); err == nil || err.Error() != (failWriterError{}).Error() {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
@@ -869,9 +863,7 @@ func ExampleTx_CopyFile() {
 
 	// Copy the database to another file.
 	toFile := tempfile()
-	if err := db.View(func(tx *bolt.Tx) error {
-		return tx.CopyFile(toFile, 0666)
-	}); err != nil {
+	if err := db.CopyFile(toFile, 0666); err != nil {
 		log.Fatal(err)
 	}
 	defer os.Remove(toFile)

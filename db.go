@@ -11,6 +11,8 @@ import (
 	"sync"
 	"time"
 	"unsafe"
+
+	"github.com/coyove/bbolt/internal"
 )
 
 // The largest step that can be taken when remapping the mmap.
@@ -1161,6 +1163,78 @@ func (db *DB) grow(sz int) error {
 
 func (db *DB) IsReadOnly() bool {
 	return db.readOnly
+}
+
+func (db *DB) Copy(w io.Writer) error {
+	_, err := db.WriteTo(w)
+	return err
+}
+
+// WriteTo writes the entire database to a writer.
+// It can't be called concurrently, or inside transactions.
+func (db *DB) WriteTo(w io.Writer) (n int64, err error) {
+	// Attempt to open reader with WriteFlag
+	f, err := db.openFile(db.path, os.O_RDONLY, 0)
+	if err != nil {
+		return 0, err
+	}
+	defer func() {
+		if cerr := f.Close(); err == nil {
+			err = cerr
+		}
+	}()
+
+	fullMetaSize := int64(db.pageSize*2) + freelistRegionSize*2
+
+	// Lock to prevent any changes on meta pages.
+	db.rwlock.Lock()
+
+	// Copy meta and freelist pages.
+	wn, err := io.CopyN(w, f, fullMetaSize)
+	size := int64(db.meta().pgid) * int64(db.pageSize)
+
+	// Open a read transaction to lock pending pages.
+	tx, err := db.Begin(false)
+	if err != nil {
+		db.rwlock.Unlock()
+		return 0, err
+	}
+	defer tx.Rollback()
+
+	// Other writes can be processed from now on.
+	db.rwlock.Unlock()
+
+	if internal.TestSlowWriteTo {
+		time.Sleep(time.Second)
+	}
+
+	n += wn
+	if err != nil {
+		return n, err
+	}
+
+	// Copy data pages.
+	wn, err = io.CopyN(w, f, size-fullMetaSize)
+	n += wn
+	if err != nil {
+		return n, err
+	}
+
+	return n, nil
+}
+
+func (db *DB) CopyFile(path string, mode os.FileMode) error {
+	f, err := db.openFile(path, os.O_RDWR|os.O_CREATE|os.O_TRUNC, mode)
+	if err != nil {
+		return err
+	}
+
+	_, err = db.WriteTo(f)
+	if err != nil {
+		_ = f.Close()
+		return err
+	}
+	return f.Close()
 }
 
 // Options represents the options that can be set when opening a database.

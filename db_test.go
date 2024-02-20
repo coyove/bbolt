@@ -20,6 +20,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	bolt "github.com/coyove/bbolt"
+	"github.com/coyove/bbolt/internal"
 	"github.com/coyove/bbolt/internal/btesting"
 )
 
@@ -662,8 +663,8 @@ func TestDB_BeginRW(t *testing.T) {
 // TestDB_Concurrent_WriteTo checks that issuing WriteTo operations concurrently
 // with commits does not produce corrupted db files.
 func TestDB_Concurrent_WriteTo(t *testing.T) {
-	// COYOVE: concurrent WriteTo won't work because freelist spaces can be overwritten.
-	return
+	internal.TestSlowWriteTo = true
+	defer func() { internal.TestSlowWriteTo = false }()
 
 	o := &bolt.Options{}
 	db := btesting.MustCreateDBWithOption(t, o)
@@ -671,18 +672,14 @@ func TestDB_Concurrent_WriteTo(t *testing.T) {
 	var wg sync.WaitGroup
 	wtxs, rtxs := 5, 5
 	wg.Add(wtxs * rtxs)
-	f := func(tx *bolt.Tx) {
+	f := func() {
 		defer wg.Done()
 		f, err := os.CreateTemp("", "bolt-")
 		if err != nil {
 			panic(err)
 		}
 		time.Sleep(time.Duration(rand.Intn(20)+1) * time.Millisecond)
-		_, err = tx.WriteTo(f)
-		if err != nil {
-			panic(err)
-		}
-		err = tx.Rollback()
+		_, err = db.WriteTo(f)
 		if err != nil {
 			panic(err)
 		}
@@ -705,20 +702,24 @@ func TestDB_Concurrent_WriteTo(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	for j := 0; j < rtxs*wtxs; j++ {
+		go f()
+	}
 	for i := 0; i < wtxs; i++ {
 		tx, err := db.Begin(true)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := tx.Bucket([]byte("abc")).Put([]byte{0}, []byte{0}); err != nil {
-			t.Fatal(err)
-		}
-		for j := 0; j < rtxs; j++ {
-			rtx, rerr := db.Begin(false)
-			if rerr != nil {
-				t.Fatal(rerr)
+		bk := tx.Bucket([]byte("abc"))
+		for ii := 0; ii < 1000; ii++ {
+			if err := bk.Delete([]byte{byte(i), byte(ii)}); err != nil {
+				t.Fatal(err)
 			}
-			go f(rtx)
+		}
+		for ii := 0; ii < 1000; ii++ {
+			if err := bk.Put([]byte{byte(i), byte(ii)}, make([]byte, 100)); err != nil {
+				t.Fatal(err)
+			}
 		}
 		if err := tx.Commit(); err != nil {
 			t.Fatal(err)
