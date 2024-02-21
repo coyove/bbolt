@@ -21,6 +21,14 @@ const (
 	freelistPageFlag = 0x10
 )
 
+var fastCheckBits = func() (bits [0x11]bool) {
+	bits[branchPageFlag] = true
+	bits[leafPageFlag] = true
+	bits[metaPageFlag] = true
+	bits[freelistPageFlag] = true
+	return
+}()
+
 const (
 	bucketLeafFlag = 0x01
 )
@@ -54,13 +62,13 @@ func (p *page) meta() *meta {
 }
 
 func (p *page) fastCheck(id pgid) {
-	_assert(p.id == id, "Page expected to be: %v, but self identifies as %v", id, p.id)
+	if p.id != id {
+		panic(fmt.Sprintf("Page expected to be: %v, but self identifies as %v", id, p.id))
+	}
 	// Only one flag of page-type can be set.
-	_assert(p.flags == branchPageFlag ||
-		p.flags == leafPageFlag ||
-		p.flags == metaPageFlag ||
-		p.flags == freelistPageFlag,
-		"page %v: has unexpected type/flags: %x", p.id, p.flags)
+	if p.flags > freelistPageFlag || !fastCheckBits[p.flags] {
+		panic(fmt.Sprintf("page %v: has unexpected type/flags: %x", p.id, p.flags))
+	}
 }
 
 // leafPageElement retrieves the leaf node by index
