@@ -21,9 +21,6 @@ const maxMmapStep = 1 << 30 // 1GB
 // The data file format version.
 const version = 2
 
-// Represents a marker value to indicate that a file is a Bolt DB.
-const magic uint32 = 0xED0CDACD
-
 const pgidNoFreelist pgid = 0xffffffffffffffff
 
 const freelistMaxSize = 1 * 1024 * 1024
@@ -576,7 +573,7 @@ func (db *DB) init() error {
 
 		// Initialize the meta page.
 		m := p.meta()
-		m.magic = magic
+		m.magic = internal.Magic
 		m.version = version
 		m.pageSize = uint32(db.pageSize)
 		m.flid = 0
@@ -1364,7 +1361,7 @@ func (db *DB) freelistPage() *page {
 
 // validate checks the marker bytes and version of the meta page to ensure it matches this binary.
 func (m *meta) validate() error {
-	if m.magic != magic {
+	if m.magic != internal.Magic {
 		return ErrInvalid
 	} else if m.version != version {
 		return ErrVersionMismatch

@@ -20,9 +20,9 @@ import (
 	"unicode/utf8"
 	"unsafe"
 
-	"go.etcd.io/bbolt/internal/guts_cli"
+	"github.com/coyove/bbolt/internal/guts_cli"
 
-	bolt "go.etcd.io/bbolt"
+	bolt "github.com/coyove/bbolt"
 )
 
 var (
@@ -202,8 +202,7 @@ func (cmd *checkCommand) Run(args ...string) error {
 
 	// Open database.
 	db, err := bolt.Open(path, 0666, &bolt.Options{
-		ReadOnly:        true,
-		PreLoadFreelist: true,
+		ReadOnly: true,
 	})
 	if err != nil {
 		return err
@@ -634,8 +633,7 @@ func (cmd *pagesCommand) Run(args ...string) error {
 
 	// Open database.
 	db, err := bolt.Open(path, 0666, &bolt.Options{
-		ReadOnly:        true,
-		PreLoadFreelist: true,
+		ReadOnly: true,
 	})
 	if err != nil {
 		return err

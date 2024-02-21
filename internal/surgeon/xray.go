@@ -9,7 +9,7 @@ import (
 	"bytes"
 	"fmt"
 
-	"go.etcd.io/bbolt/internal/guts_cli"
+	"github.com/coyove/bbolt/internal/guts_cli"
 )
 
 type XRay struct {

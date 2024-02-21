@@ -8,8 +8,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	bolt "go.etcd.io/bbolt"
-	"go.etcd.io/bbolt/internal/btesting"
+	bolt "github.com/coyove/bbolt"
+	"github.com/coyove/bbolt/internal/btesting"
 	gofail "go.etcd.io/gofail/runtime"
 )
 

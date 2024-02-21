@@ -10,6 +10,8 @@ import (
 	"io"
 	"os"
 	"unsafe"
+
+	"github.com/coyove/bbolt/internal"
 )
 
 var (
@@ -19,9 +21,6 @@ var (
 
 // PageHeaderSize represents the size of the bolt.Page header.
 const PageHeaderSize = 16
-
-// Represents a marker value to indicate that a file (Meta Page) is a Bolt DB.
-const magic uint32 = 0xED0CDAED
 
 // DO NOT EDIT. Copied from the "bolt" package.
 const maxAllocSize = 0xFFFFFFF
@@ -209,26 +208,43 @@ func (n *BranchPageElement) PgId() Pgid {
 
 // DO NOT EDIT. Copied from the "bolt" package.
 type LeafPageElement struct {
-	flags uint32
-	pos   uint32
-	ksize uint32
-	vsize uint32
+	//  1: flags
+	// 26: pos
+	// 13: key
+	// 24: value
+	data uint64
+}
+
+func (n *LeafPageElement) flags() uint32 {
+	return uint32(n.data >> 63)
+}
+
+func (n *LeafPageElement) pos() uint32 {
+	return uint32(n.data>>37) & 0x3FFFFFF
+}
+
+func (n *LeafPageElement) ksize() uint32 {
+	return uint32(n.data>>24) & 0x1FFF
+}
+
+func (n *LeafPageElement) vsize() uint32 {
+	return uint32(n.data) & 0xFFFFFF
 }
 
 // DO NOT EDIT. Copied from the "bolt" package.
 func (n *LeafPageElement) Key() []byte {
 	buf := (*[maxAllocSize]byte)(unsafe.Pointer(n))
-	return buf[n.pos : n.pos+n.ksize]
+	return buf[n.pos() : n.pos()+n.ksize()]
 }
 
 // DO NOT EDIT. Copied from the "bolt" package.
 func (n *LeafPageElement) Value() []byte {
 	buf := (*[maxAllocSize]byte)(unsafe.Pointer(n))
-	return buf[n.pos+n.ksize : n.pos+n.ksize+n.vsize]
+	return buf[n.pos()+n.ksize() : n.pos()+n.ksize()+n.vsize()]
 }
 
 func (n *LeafPageElement) IsBucketEntry() bool {
-	return n.flags&uint32(bucketLeafFlag) != 0
+	return n.flags()&uint32(bucketLeafFlag) != 0
 }
 
 func (n *LeafPageElement) Bucket() *Bucket {
@@ -325,7 +341,7 @@ func ReadPageAndHWMSize(path string) (uint64, Pgid, error) {
 
 	// Read Page size from metadata.
 	m := LoadPageMeta(buf)
-	if m.magic != magic {
+	if m.magic != internal.Magic {
 		return 0, 0, fmt.Errorf("the Meta Page has wrong (unexpected) magic")
 	}
 	return uint64(m.pageSize), Pgid(m.pgid), nil

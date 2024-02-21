@@ -9,13 +9,15 @@ bbolt
 [![LICENSE](https://img.shields.io/github/license/etcd-io/bbolt.svg?style=flat-square)](https://github.com/etcd-io/bbolt/blob/master/LICENSE)
 
 ## Note
-This is my own fork of bbolt v1.3.8, which optimized the internal layout of the
-database, producing files 30-50% smaller than the original implementation for
-small keys and values.
+This is a fork of bbolt v1.3.8, which optimized the internal layout of the
+database, producing files 20-30% smaller than the original implementation for
+small keys and values (max key size is 8K and max value size is 16M).
 
-Max key size is 8K and max value size is 16M.
+Freelist is also redesigned to meet demands under high write loads, where new errors
+and panics can arise: some are retriable/recoverable, some are fatal.
+Old code may or may not work reliably and must be readapted to use this fork.
 
-WARNING: this fork is NOT binary compatible. 
+This fork is NOT binary compatible with the original. 
 =====
 
 bbolt is a fork of [Ben Johnson's][gh_ben] [Bolt][bolt] key/value
