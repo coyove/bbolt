@@ -1165,6 +1165,10 @@ func (db *DB) IsReadOnly() bool {
 func (db *DB) Size() (sz int64) {
 	db.metalock.Lock()
 	defer db.metalock.Unlock()
+
+	db.mmaplock.RLock()
+	defer db.mmaplock.RUnlock()
+
 	return int64(db.meta().pgid) * int64(db.pageSize)
 }
 
