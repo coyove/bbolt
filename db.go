@@ -1165,6 +1165,12 @@ func (db *DB) IsReadOnly() bool {
 	return db.readOnly
 }
 
+func (db *DB) Size() (sz int64) {
+	db.metalock.Lock()
+	defer db.metalock.Unlock()
+	return int64(db.meta().pgid) * int64(db.pageSize)
+}
+
 func (db *DB) Copy(w io.Writer) error {
 	_, err := db.WriteTo(w)
 	return err
