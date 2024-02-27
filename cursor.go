@@ -3,8 +3,6 @@ package bbolt
 import (
 	"bytes"
 	"fmt"
-	"math"
-	"math/big"
 	"sort"
 )
 
@@ -121,6 +119,28 @@ func (c *Cursor) PrevSamePage() (key []byte, value []byte, ok bool) {
 		return k, nil, ok
 	}
 	return k, v, ok
+}
+
+// PrevN is equivalent to calling Cursor.Prev() N times, and returns the exact number of calls
+// if running out of keys.
+func (c *Cursor) PrevN(n int) (count int, key []byte, value []byte) {
+	_assert(c.bucket.tx.db != nil, "tx closed")
+	_assert(n >= 0, "invalid number")
+
+	var flags uint32
+	if n == 0 {
+		if len(c.stack) == 0 {
+			return 0, nil, nil
+		}
+		key, value, flags = c.keyValue()
+	} else {
+		count, key, value, flags = c.prevN(n)
+	}
+
+	if (flags & uint32(bucketLeafFlag)) != 0 {
+		return count, key, nil
+	}
+	return count, key, value
 }
 
 // Seek moves the cursor to a given key using a b-tree search and returns it.
@@ -280,108 +300,45 @@ func (c *Cursor) prev() (key []byte, value []byte, flags uint32) {
 	return c.keyValue()
 }
 
-func (c *Cursor) Distance(start, end []byte) int {
-	_assert(c.bucket.tx.db != nil, "tx closed")
-	dist, _ := c.distanceLimit(start, end, 0)
-	return dist
-}
-
-func (c *Cursor) EstimatedDistance(start, end []byte, giveup int) (int, bool) {
-	_assert(c.bucket.tx.db != nil, "tx closed")
-	return c.distanceLimit(start, end, giveup)
-}
-
-func (c *Cursor) distanceLimit(start, end []byte, giveup int) (int, bool) {
-	if bytes.Compare(start, end) > 0 {
-		start, end = end, start
-	}
-
-	if bytes.Equal(start, end) {
-		return 0, true
-	}
-
-	k, _, _ := c.seek(end)
-	if ref := &c.stack[len(c.stack)-1]; ref.index >= ref.count() {
-		k, _, _ = c.next()
-	}
-	if len(k) == 0 {
-		c.last()
-	}
-
-	getKeyRange := func(ref *elemRef) ([]byte, []byte, int) {
-		if ref.node != nil {
-			return ref.node.inodes[0].key, ref.node.inodes[len(ref.node.inodes)-1].key, len(ref.node.inodes)
-		}
-
-		return ref.page.leafPageElement(0).key(), ref.page.leafPageElement(ref.page.count - 1).key(), int(ref.page.count)
-	}
-
-	ref := &c.stack[len(c.stack)-1]
-	dist := ref.index
-	start0, end0, count := getKeyRange(ref)
-
-	for giveup == 0 || dist < giveup {
-		// fmt.Println(ref.index, ref.count(), string(start0), string(start), string(end0))
-		if bytes.Compare(start, end0) > 0 {
-			dist -= count
-			return dist, true
-		}
-		if bytes.Compare(start0, start) <= 0 && bytes.Compare(start, end0) <= 0 {
-			if ref.node != nil {
-				for i, inode := range ref.node.inodes {
-					if bytes.Compare(inode.key, start) >= 0 {
-						return dist - i, true
-					}
+func (c *Cursor) prevN(n int) (count int, key []byte, value []byte, flags uint32) {
+PREV:
+	for i := len(c.stack) - 1; i >= 0; i-- {
+		elem := &c.stack[i]
+		if elem.index > 0 {
+			if elem.isLeaf() {
+				count += elem.index + 1
+				if count > n {
+					elem.index = count - n - 1
+					count = n
+					goto RET
 				}
+				// Consumed the current element, move up the stack.
+				// (note that we are now at the first key, so decrease the 'count')
+				count--
 			} else {
-				for i := 0; i < int(ref.page.count); i++ {
-					if bytes.Compare(ref.page.leafPageElement(uint16(i)).key(), start) >= 0 {
-						return dist - i, true
-					}
-				}
-			}
-			panic("BUG: exhausted distance counting")
-		}
-
-		for {
-			c.stack = c.stack[:len(c.stack)-1]
-			if len(c.stack) == 0 {
-				return dist, true
-			}
-			ref := &c.stack[len(c.stack)-1]
-			if ref.index > 0 {
-				ref.index--
+				elem.index--
 				break
 			}
 		}
-
-		c.last()
-
-		ref = &c.stack[len(c.stack)-1]
-		start0, end0, count = getKeyRange(ref)
-		dist += count
+		c.stack = c.stack[:i]
 	}
 
-	// Timed out, let's estimate the distance by using (start, start0, end).
-	ln := int(math.Max(float64(len(end)), math.Max(float64(len(start)), float64(len(start0)))))
-	for len(start) < ln {
-		start = append(start, 0)
-	}
-	for len(start0) < ln {
-		start0 = append(start0, 0)
-	}
-	for len(end) < ln {
-		end = append(end, 0)
+	// If we've hit the end then return nil.
+	if len(c.stack) == 0 {
+		return count, nil, nil, 0
 	}
 
-	startNum := (&big.Int{}).SetBytes(start)
-	start0Num := (&big.Int{}).SetBytes(start0)
-	endNum := (&big.Int{}).SetBytes(end)
+	// Move down the stack to find the last element of the last leaf under this branch.
+	c.last()
 
-	d := big.NewInt(int64(dist))
-	d.Mul(d, (&big.Int{}).Sub(endNum, startNum))
-	d.Div(d, (&big.Int{}).Sub(endNum, start0Num))
-	return int(d.Int64()), false
+	count++
+	if count < n {
+		goto PREV
+	}
+
+RET:
+	key, value, flags = c.keyValue()
+	return count, key, value, flags
 }
 
 func (c *Cursor) prevSamePage() (key []byte, value []byte, flags uint32, ok bool) {

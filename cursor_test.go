@@ -12,6 +12,7 @@ import (
 	"sort"
 	"testing"
 	"testing/quick"
+	"time"
 
 	bolt "github.com/coyove/bbolt"
 	"github.com/coyove/bbolt/internal/btesting"
@@ -743,19 +744,30 @@ func TestCursor_QuickCheck_BucketsOnly_Reverse(t *testing.T) {
 	}
 }
 
-func TestCursor_Distance(t *testing.T) {
+func TestCursor_PrevN(t *testing.T) {
 	rand.Seed(int64(qseed))
 	db := btesting.MustCreateDB(t)
+	kb := func(i int) []byte { return fmt.Appendf(nil, "%04x", i) }
 
 	N := 1000
 	if err := db.Update(func(tx *bolt.Tx) error {
-		b, err := tx.CreateBucket([]byte("distance"))
+		b, err := tx.CreateBucket([]byte("empty"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, err = tx.CreateBucket([]byte("prevN"))
 		if err != nil {
 			t.Fatal(err)
 		}
 		for i := 0; i < N; i++ {
-			if err := b.Put(fmt.Appendf(nil, "%04x", i), make([]byte, rand.Intn(32)+32)); err != nil {
-				t.Fatal(err)
+			if rand.Intn(2) == 1 {
+				if _, err := b.CreateBucket(kb(i)); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				if err := b.Put(kb(i), make([]byte, rand.Intn(32)+32)); err != nil {
+					t.Fatal(err)
+				}
 			}
 		}
 		return nil
@@ -764,67 +776,82 @@ func TestCursor_Distance(t *testing.T) {
 	}
 
 	if err := db.View(func(tx *bolt.Tx) error {
-		c := tx.Bucket([]byte("distance")).Cursor()
-
-		if d := c.Distance(nil, []byte{1}); d != 0 {
-			t.Fatalf("cursor distance before first: expected %d, got %d", 0, d)
-		}
+		bk := tx.Bucket([]byte("prevN"))
 
 		for i := 0; i < N; i++ {
-			if d := c.Distance(fmt.Appendf(nil, "%04xa", i), fmt.Appendf(nil, "%04xb", i)); d != 0 {
-				t.Fatalf("cursor distance (%d) after last: expected %d, got %d", i, 0, d)
+			c := bk.Cursor()
+			c.First()
+			count, key, _ := c.PrevN(1)
+			if !bytes.Equal(key, nil) || count != 0 {
+				t.Fatalf("cursor PrevN: expected (0, nil), got (%d, %s)", count, key)
 			}
-			if i > 0 {
-				if d := c.Distance(fmt.Appendf(nil, "%04xa", i-1), fmt.Appendf(nil, "%04xb", i)); d != 1 {
-					t.Fatalf("cursor distance (%d) off by 1: expected %d, got %d", i, 1, d)
-				}
+
+			c.Seek(kb(i))
+			count, key, _ = c.PrevN(i)
+			if !bytes.Equal(key, []byte("0000")) || count != i {
+				t.Fatalf("cursor PrevN: expected (%d, 0000), got (%d, %s)", i, count, key)
 			}
-			for j := 0; j < N; j++ {
-				dist := int(math.Abs(float64(i - j)))
-				if d := c.Distance(fmt.Appendf(nil, "%04x", i), fmt.Appendf(nil, "%04x", j)); d != dist {
-					t.Fatalf("cursor distance: expected %d, got %d", dist, d)
-				}
+
+			c.Seek(kb(i))
+			count, key, _ = c.PrevN(i + 1)
+			if !bytes.Equal(key, nil) || count != i {
+				t.Fatalf("cursor PrevN: expected (%d, nil), got (%d, %s)", i, count, key)
 			}
+
 			for j := i; j < N; j++ {
-				dist := j - i + 1
-				if d := c.Distance(fmt.Appendf(nil, "%04x", i), fmt.Appendf(nil, "%04x~", j)); d != dist {
-					t.Fatalf("cursor distance: expected %d, got %d", dist, d)
+				dist := int(math.Abs(float64(i - j)))
+
+				c := bk.Cursor()
+				c.Seek(kb(j))
+				count, key, _ := c.PrevN(dist)
+
+				if !bytes.Equal(key, kb(i)) || count != dist {
+					t.Fatalf("cursor PrevN: expected (%d, %v), got (%d, %s)", dist, i, count, key)
 				}
 			}
 		}
 
-		for j := 0; j < N; j++ {
-			key := fmt.Appendf(nil, "%04x", j)
-			dist := j
-			if d := c.Distance(nil, key); d != dist {
-				t.Fatalf("cursor distance: expected %d, got %d", dist, d)
-			}
-
-			dist = j + 1
-			if d := c.Distance(nil, append(key, 1)); d != dist {
-				t.Fatalf("cursor distance: expected %d, got %d", dist, d)
-			}
-
-			dist = N - j
-			if d := c.Distance(key, []byte{0xff}); d != dist {
-				t.Fatalf("cursor distance: expected %d, got %d", dist, d)
-			}
-
-			dist = N - j - 1
-			if d := c.Distance(append(key, 1), []byte{0xff}); d != dist {
-				t.Fatalf("cursor distance: expected %d, got %d", dist, d)
-			}
-
-			_, exact := c.EstimatedDistance(key, []byte{0xff}, 1)
-			if exact {
-				t.Fatal("not exact")
-			}
+		c := tx.Bucket([]byte("empty")).Cursor()
+		c.Last()
+		count, key, _ := c.PrevN(1)
+		if !bytes.Equal(key, nil) || count != 0 {
+			t.Fatalf("empty cursor PrevN: expected (0, nil), got (%d, %s)", count, key)
 		}
 
 		return nil
 	}); err != nil {
 		t.Fatal(err)
 	}
+
+	const B = 1000
+	db.View(func(tx *bolt.Tx) error {
+		start := time.Now()
+		c := tx.Bucket([]byte("prevN")).Cursor()
+		for i := 0; i < B; i++ {
+			c.Last()
+			if _, key, _ := c.PrevN(N - 1); !bytes.Equal(key, []byte("0000")) {
+				t.Fatalf("cursor bench: expected (0000), got (%s)", key)
+			}
+		}
+		t.Logf("PrevN bench in %v", time.Since(start))
+		return nil
+	})
+	db.View(func(tx *bolt.Tx) error {
+		start := time.Now()
+		c := tx.Bucket([]byte("prevN")).Cursor()
+		for i := 0; i < B; i++ {
+			c.Last()
+			var key []byte
+			for i := 0; i < N-1; i++ {
+				key, _ = c.Prev()
+			}
+			if !bytes.Equal(key, []byte("0000")) {
+				t.Fatalf("cursor bench: expected (0000), got (%s)", key)
+			}
+		}
+		t.Logf("Prev bench in %v", time.Since(start))
+		return nil
+	})
 }
 
 func ExampleCursor() {
