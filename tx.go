@@ -1,6 +1,10 @@
 package bbolt
 
 import (
+	"bytes"
+	"compress/gzip"
+	"crypto/sha1"
+	"encoding/binary"
 	"sort"
 	"strings"
 	"sync/atomic"
@@ -176,6 +180,30 @@ func (tx *Tx) Commit() error {
 		return err
 	}
 
+	if tx.db.BeforeCommit != nil {
+		buf := &bytes.Buffer{}
+		w := gzip.NewWriter(buf)
+		dump := func(p *page) {
+			sz := (uint64(p.overflow) + 1) * uint64(tx.db.pageSize)
+			binary.Write(w, binary.LittleEndian, uint32(sz))
+			w.Write(unsafeByteSlice(unsafe.Pointer(p), 0, 0, int(sz)))
+		}
+		{
+			var p page
+			tx.meta.write(&p)
+			dump(&p)
+		}
+		for _, p := range tx.pages {
+			dump(p)
+		}
+		w.Close()
+		h := sha1.Sum(buf.Bytes())
+		buf.Write(h[:])
+		if err := tx.db.BeforeCommit(buf.Bytes()); err != nil {
+			return err
+		}
+	}
+
 	// If the high water mark has moved up then attempt to grow the database.
 	if tx.meta.pgid > opgid {
 		if err := tx.db.grow(int(tx.meta.pgid+1) * tx.db.pageSize); err != nil {
@@ -281,7 +309,7 @@ func (tx *Tx) rollback() {
 		tx.db.freelist.rollback(tx.meta.txid)
 		// When mmap fails, the `data`, `dataref` and `datasz` may be reset to
 		// zero values, and there is no way to reload free page IDs in this case.
-		if tx.db.data != nil {
+		if tx.db.file.Mdata() != nil {
 			// Read free page list from freelist page.
 			tx.db.freelist.reload(tx.db.freelistPage())
 		}
@@ -365,7 +393,7 @@ func (tx *Tx) write() error {
 			}
 			buf := unsafeByteSlice(unsafe.Pointer(p), written, 0, int(sz))
 
-			if _, err := tx.db.ops.writeAt(buf, offset); err != nil {
+			if _, err := tx.db.file.WriteAt(buf, offset); err != nil {
 				return err
 			}
 
@@ -386,7 +414,7 @@ func (tx *Tx) write() error {
 
 	// Ignore file sync if flag is set on DB.
 	if !tx.db.NoSync || IgnoreNoSync {
-		if err := fdatasync(tx.db); err != nil {
+		if err := tx.db.file.Fdatasync(); err != nil {
 			return err
 		}
 	}
@@ -419,11 +447,11 @@ func (tx *Tx) writeMeta() error {
 	tx.meta.write(p)
 
 	// Write the meta page to file.
-	if _, err := tx.db.ops.writeAt(buf, int64(p.id)*int64(tx.db.pageSize)); err != nil {
+	if _, err := tx.db.file.WriteAt(buf, int64(p.id)*int64(tx.db.pageSize)); err != nil {
 		return err
 	}
 	if !tx.db.NoSync || IgnoreNoSync {
-		if err := fdatasync(tx.db); err != nil {
+		if err := tx.db.file.Fdatasync(); err != nil {
 			return err
 		}
 	}

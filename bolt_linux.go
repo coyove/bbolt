@@ -1,10 +1,11 @@
 package bbolt
 
 import (
+	"os"
 	"syscall"
 )
 
 // fdatasync flushes written data to a file descriptor.
-func fdatasync(db *DB) error {
-	return syscall.Fdatasync(int(db.file.Fd()))
+func fdatasync(file *os.File) error {
+	return syscall.Fdatasync(int(file.Fd()))
 }

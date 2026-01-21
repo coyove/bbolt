@@ -63,12 +63,12 @@ func TestMlock_DbCanGrow_Big(t *testing.T) {
 	for chunk := 0; chunk < chunksBefore; chunk++ {
 		insertChunk(t, db, chunk)
 	}
-	dbSize := fileSize(db.Path())
+	dbSize := fileSize(db)
 
 	for chunk := 0; chunk < chunksAfter; chunk++ {
 		insertChunk(t, db, chunksBefore+chunk)
 	}
-	newDbSize := fileSize(db.Path())
+	newDbSize := fileSize(db)
 
 	if newDbSize > dbSize {
 		t.Errorf("db growed: %v > %v", newDbSize, dbSize)

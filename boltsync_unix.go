@@ -3,7 +3,9 @@
 
 package bbolt
 
+import "os"
+
 // fdatasync flushes written data to a file descriptor.
-func fdatasync(db *DB) error {
-	return db.file.Sync()
+func fdatasync(file *os.File) error {
+	return file.Sync()
 }

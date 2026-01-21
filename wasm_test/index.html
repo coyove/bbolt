@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html>
+<body>
+    <button onclick="run()">Run</button>
+    <pre id="out"></pre>
+
+    <script src="wasm_exec.js"></script>
+    <script>
+        const go = new Go();
+
+        async function run() {
+            const result = await WebAssembly.instantiateStreaming(
+                fetch("bbolt.wasm"),
+                go.importObject
+            );
+
+            go.run(result.instance);
+            bbOpen(new Uint8Array(), function(patch) {
+                console.log(patch);
+                return "zzz";
+            });
+            console.log(bbDump());
+            bbSet("bucket", "key", "value");
+        }
+    </script>
+</body>
+</html>

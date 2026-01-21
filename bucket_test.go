@@ -205,6 +205,10 @@ func TestBucket_Put_Large(t *testing.T) {
 
 // Really large values in single page.
 func TestBucket_Put_Large_SinglePage(t *testing.T) {
+	if btesting.IsMem() {
+		t.Skip("skip in MEMORY mode")
+	}
+
 	db := btesting.MustCreateDB(t)
 
 	if err := db.Update(func(tx *bolt.Tx) error {

@@ -7,4 +7,5 @@ cover-*.out
 /.idea
 *.iml
 /cmd/bbolt/bbolt
-
+*.wasm
+wasm_exec.js

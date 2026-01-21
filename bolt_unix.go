@@ -1,24 +1,24 @@
-//go:build !windows && !plan9 && !solaris && !aix
-// +build !windows,!plan9,!solaris,!aix
+//go:build !windows && !plan9 && !solaris && !aix && !js
+// +build !windows,!plan9,!solaris,!aix,!js
 
 package bbolt
 
 import (
 	"fmt"
+	"os"
 	"syscall"
 	"time"
-	"unsafe"
 
 	"golang.org/x/sys/unix"
 )
 
 // flock acquires an advisory lock on a file descriptor.
-func flock(db *DB, exclusive bool, timeout time.Duration) error {
+func flock(file *os.File, exclusive bool, timeout time.Duration) error {
 	var t time.Time
 	if timeout != 0 {
 		t = time.Now()
 	}
-	fd := db.file.Fd()
+	fd := file.Fd()
 	flag := syscall.LOCK_NB
 	if exclusive {
 		flag |= syscall.LOCK_EX
@@ -45,43 +45,35 @@ func flock(db *DB, exclusive bool, timeout time.Duration) error {
 }
 
 // funlock releases an advisory lock on a file descriptor.
-func funlock(db *DB) error {
-	return syscall.Flock(int(db.file.Fd()), syscall.LOCK_UN)
+func funlock(file *os.File) error {
+	return syscall.Flock(int(file.Fd()), syscall.LOCK_UN)
 }
 
 // mmap memory maps a DB's data file.
-func mmap(db *DB, sz int) error {
+func mmap(file *os.File, sz int) ([]byte, error) {
 	// Map the data file to memory.
-	b, err := unix.Mmap(int(db.file.Fd()), 0, sz, syscall.PROT_READ, syscall.MAP_SHARED|db.MmapFlags)
+	b, err := unix.Mmap(int(file.Fd()), 0, sz, syscall.PROT_READ, syscall.MAP_SHARED)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	// Advise the kernel that the mmap is accessed randomly.
 	err = unix.Madvise(b, syscall.MADV_RANDOM)
 	if err != nil && err != syscall.ENOSYS {
 		// Ignore not implemented error in kernel because it still works.
-		return fmt.Errorf("madvise: %s", err)
+		return nil, fmt.Errorf("madvise: %s", err)
 	}
 
 	// Save the original byte slice and convert to a byte array pointer.
-	db.dataref = b
-	db.data = (*[maxMapSize]byte)(unsafe.Pointer(&b[0]))
-	db.datasz = sz
-	return nil
+	return b, nil
 }
 
 // munmap unmaps a DB's data file from memory.
-func munmap(db *DB) error {
-	// Ignore the unmap if we have no mapped data.
-	if db.dataref == nil {
+func munmap(data []byte) error {
+	if data == nil {
 		return nil
 	}
 
 	// Unmap using the original byte slice.
-	err := unix.Munmap(db.dataref)
-	db.dataref = nil
-	db.data = nil
-	db.datasz = 0
-	return err
+	return unix.Munmap(data)
 }

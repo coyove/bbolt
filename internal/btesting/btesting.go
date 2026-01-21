@@ -22,9 +22,10 @@ const TestFreelistType = "TEST_FREELIST_TYPE"
 // DB is a test wrapper for bolt.DB.
 type DB struct {
 	*bolt.DB
-	f string
-	o *bolt.Options
-	t testing.TB
+	f       string
+	o       *bolt.Options
+	t       testing.TB
+	prevMem []byte
 }
 
 // MustCreateDB returns a new, open DB at a temporary location.
@@ -35,6 +36,9 @@ func MustCreateDB(t testing.TB) *DB {
 // MustCreateDBWithOption returns a new, open DB at a temporary location with given options.
 func MustCreateDBWithOption(t testing.TB, o *bolt.Options) *DB {
 	f := filepath.Join(t.TempDir(), "db")
+	if IsMem() {
+		f = "<memory>"
+	}
 	return MustOpenDBWithOption(t, f, o)
 }
 
@@ -79,6 +83,9 @@ func (db *DB) Close() error {
 			db.PrintStats()
 		}
 		db.t.Logf("Closing bbolt DB at: %s", db.f)
+		if db.DB.Path() == "<memory>" {
+			db.prevMem = db.DB.UnsafeMemData()
+		}
 		err := db.DB.Close()
 		if err != nil {
 			return err
@@ -95,6 +102,9 @@ func (db *DB) MustClose() {
 }
 
 func (db *DB) MustDeleteFile() {
+	if db.Path() == "<memory>" {
+		return
+	}
 	err := os.Remove(db.Path())
 	require.NoError(db.t, err)
 }
@@ -109,7 +119,9 @@ func (db *DB) MustReopen() {
 		panic("Please call Close() before MustReopen()")
 	}
 	db.t.Logf("Reopening bbolt DB at: %s", db.f)
+	db.o.MemData = db.prevMem
 	indb, err := bolt.Open(db.Path(), 0666, db.o)
+	db.o.MemData = nil
 	require.NoError(db.t, err)
 	db.DB = indb
 }
@@ -202,4 +214,8 @@ func (db *DB) PrintStats() {
 
 func truncDuration(d time.Duration) string {
 	return regexp.MustCompile(`^(\d+)(\.\d+)`).ReplaceAllString(d.String(), "$1")
+}
+
+func IsMem() bool {
+	return os.Getenv("MEMORY") == "1"
 }

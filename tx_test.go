@@ -1005,41 +1005,37 @@ func TestTx_TruncateBeforeWrite(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		return
 	}
-	for _, isSyncFreelist := range []bool{false, true} {
-		t.Run(fmt.Sprintf("isSyncFreelist:%v", isSyncFreelist), func(t *testing.T) {
-			defer func() {
-				fmt.Println(recover())
-			}()
+	defer func() {
+		fmt.Println(recover())
+	}()
 
-			// Open the database.
-			db := btesting.MustCreateDBWithOption(t, &bolt.Options{})
+	// Open the database.
+	db := btesting.MustCreateDBWithOption(t, &bolt.Options{})
 
-			bigvalue := make([]byte, db.AllocSize/100)
-			count := 0
-			for {
-				count++
-				tx, err := db.Begin(true)
-				require.NoError(t, err)
-				b, err := tx.CreateBucketIfNotExists([]byte("bucket"))
-				require.NoError(t, err)
-				err = b.Put([]byte{byte(count)}, bigvalue)
-				require.NoError(t, err)
-				err = tx.Commit()
-				require.NoError(t, err)
+	bigvalue := make([]byte, db.AllocSize/100)
+	count := 0
+	for {
+		count++
+		tx, err := db.Begin(true)
+		require.NoError(t, err)
+		b, err := tx.CreateBucketIfNotExists([]byte("bucket"))
+		require.NoError(t, err)
+		err = b.Put([]byte{byte(count)}, bigvalue)
+		require.NoError(t, err)
+		err = tx.Commit()
+		require.NoError(t, err)
 
-				size := fileSize(db.Path())
+		size := fileSize(db)
 
-				if size > int64(db.AllocSize) && size < int64(db.AllocSize)*2 {
-					// db.grow expands the file aggresively, that double the size while smaller than db.AllocSize,
-					// or increase with a step of db.AllocSize if larger, by which we can test if db.grow has run.
-					t.Fatalf("db.grow doesn't run when file size changes. file size: %d", size)
-				}
-				if size > int64(db.AllocSize) {
-					break
-				}
-			}
-			db.MustClose()
-			db.MustDeleteFile()
-		})
+		if size > int64(db.AllocSize) && size < int64(db.AllocSize)*2 {
+			// db.grow expands the file aggresively, that double the size while smaller than db.AllocSize,
+			// or increase with a step of db.AllocSize if larger, by which we can test if db.grow has run.
+			t.Fatalf("db.grow doesn't run when file size changes. file size: %d", size)
+		}
+		if size > int64(db.AllocSize) {
+			break
+		}
 	}
+	db.MustClose()
+	db.MustDeleteFile()
 }

@@ -1,6 +1,10 @@
 package bbolt
 
 import (
+	"bytes"
+	"compress/gzip"
+	"crypto/sha1"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"hash/fnv"
@@ -24,6 +28,8 @@ const version = 2
 const pgidNoFreelist pgid = 0xffffffffffffffff
 
 const freelistMaxSize = 1 * 1024 * 1024
+
+// const freelistMaxSize = 8 * 1024
 
 const freelistRegionSize = 8 * freelistMaxSize
 
@@ -130,17 +136,32 @@ type DB struct {
 	// Supported only on Unix via mlock/munlock syscalls.
 	Mlock bool
 
+	BeforeCommit func([]byte) error
+
 	HardLimitPendingPages int
 
 	path     string
 	openFile func(string, int, os.FileMode) (*os.File, error)
-	file     *os.File
-	// `dataref` isn't used at all on Windows, and the golangci-lint
-	// always fails on Windows platform.
-	//nolint
-	dataref  []byte // mmap'ed readonly, write throws SEGV
-	data     *[maxMapSize]byte
-	datasz   int
+	file     interface {
+		Name() string
+		Close() error
+		Truncate(int64, bool) error
+		WriteAt([]byte, int64) (int, error)
+		ReadAt([]byte, int64) (int, error)
+		Size() (int64, error)
+
+		Fdatasync() error
+		Flock(exclusive bool, timeout time.Duration) error
+		Funlock() error
+
+		Minvalidate()
+		Mmap(sz int) error
+		Munmap() error
+		Mlock(fileSize int) error
+		Munlock(fileSize int) error
+		Mdata() *[maxMapSize]byte
+		MdataSize() int
+	}
 	filesz   int // current on disk file size
 	meta0    *meta
 	meta1    *meta
@@ -161,10 +182,6 @@ type DB struct {
 	metalock sync.Mutex   // Protects meta page access.
 	mmaplock sync.RWMutex // Protects mmap access during remapping.
 	statlock sync.RWMutex // Protects stats access.
-
-	ops struct {
-		writeAt func(b []byte, off int64) (n int, err error)
-	}
 
 	// Read only mode.
 	// When true, Update() and Begin(true) return ErrDatabaseReadOnly immediately.
@@ -220,11 +237,16 @@ func Open(path string, mode os.FileMode, options *Options) (*DB, error) {
 		db.openFile = os.OpenFile
 	}
 
-	// Open data file and separate sync handler for metadata writes.
-	var err error
-	if db.file, err = db.openFile(path, flag|os.O_CREATE, mode); err != nil {
-		_ = db.close()
-		return nil, err
+	if path == "<memory>" {
+		db.file = &MemFile{filedata: options.MemData}
+	} else {
+		// Open data file and separate sync handler for metadata writes.
+		orig, err := db.openFile(path, flag|os.O_CREATE, mode)
+		if err != nil {
+			_ = db.close()
+			return nil, err
+		}
+		db.file = &OsFile{file: orig}
 	}
 	db.path = db.file.Name()
 
@@ -235,13 +257,10 @@ func Open(path string, mode os.FileMode, options *Options) (*DB, error) {
 	// if !options.ReadOnly.
 	// The database file is locked using the shared lock (more than one process may
 	// hold a lock at the same time) otherwise (options.ReadOnly is set).
-	if err := flock(db, !db.readOnly, options.Timeout); err != nil {
+	if err := db.file.Flock(!db.readOnly, options.Timeout); err != nil {
 		_ = db.close()
 		return nil, err
 	}
-
-	// Default values for test hooks
-	db.ops.writeAt = db.file.WriteAt
 
 	if db.pageSize = options.PageSize; db.pageSize == 0 {
 		// Set the default page size to the OS page size.
@@ -249,10 +268,10 @@ func Open(path string, mode os.FileMode, options *Options) (*DB, error) {
 	}
 
 	// Initialize the database if it doesn't exist.
-	if info, err := db.file.Stat(); err != nil {
+	if size, err := db.file.Size(); err != nil {
 		_ = db.close()
 		return nil, err
-	} else if info.Size() == 0 {
+	} else if size == 0 {
 		// Initialize new files with meta pages.
 		if err := db.init(); err != nil {
 			// clean up file descriptor on initialization fail
@@ -352,10 +371,10 @@ func (db *DB) getPageSizeFromSecondMeta() (int, bool, error) {
 	)
 
 	// get the db file size
-	if info, err := db.file.Stat(); err != nil {
+	if size, err := db.file.Size(); err != nil {
 		return 0, metaCanRead, err
 	} else {
-		fileSize = info.Size()
+		fileSize = size
 	}
 
 	// We need to read the second meta page, so we should skip the first page;
@@ -399,15 +418,15 @@ func (db *DB) mmap(minsz int) (err error) {
 	db.mmaplock.Lock()
 	defer db.mmaplock.Unlock()
 
-	info, err := db.file.Stat()
+	dbsize, err := db.file.Size()
 	if err != nil {
 		return fmt.Errorf("mmap stat error: %s", err)
-	} else if int(info.Size()) < db.pageSize*2 {
+	} else if int(dbsize) < db.pageSize*2 {
 		return fmt.Errorf("file size too small")
 	}
 
 	// Ensure the size is at least the minimum size.
-	fileSize := int(info.Size())
+	fileSize := int(dbsize)
 	var size = fileSize
 	if size < minsz {
 		size = minsz
@@ -437,7 +456,7 @@ func (db *DB) mmap(minsz int) (err error) {
 	// Memory-map the data file as a byte slice.
 	// gofail: var mapError string
 	// return errors.New(mapError)
-	if err = mmap(db, size); err != nil {
+	if err = db.file.Mmap(size); err != nil {
 		return err
 	}
 
@@ -445,7 +464,7 @@ func (db *DB) mmap(minsz int) (err error) {
 	// dataref, data, datasz, meta0 and meta1.
 	defer func() {
 		if err != nil {
-			if unmapErr := db.munmap(); unmapErr != nil {
+			if unmapErr := db.file.Munmap(); unmapErr != nil {
 				err = fmt.Errorf("%w; rollback unmap also failed: %v", err, unmapErr)
 			}
 		}
@@ -453,11 +472,15 @@ func (db *DB) mmap(minsz int) (err error) {
 
 	if db.Mlock {
 		// Don't allow swapping of data file
-		if err := db.mlock(fileSize); err != nil {
+		if err := db.file.Mlock(fileSize); err != nil {
 			return err
 		}
 	}
 
+	return db.reloadMeta()
+}
+
+func (db *DB) reloadMeta() error {
 	// Save references to the meta pages.
 	db.meta0 = db.page(0).meta()
 	db.meta1 = db.page(1).meta()
@@ -470,14 +493,13 @@ func (db *DB) mmap(minsz int) (err error) {
 	if err0 != nil && err1 != nil {
 		return err0
 	}
-
 	return nil
 }
 
 func (db *DB) invalidate() {
-	db.dataref = nil
-	db.data = nil
-	db.datasz = 0
+	if db.file != nil {
+		db.file.Minvalidate()
+	}
 
 	db.meta0 = nil
 	db.meta1 = nil
@@ -487,9 +509,13 @@ func (db *DB) invalidate() {
 func (db *DB) munmap() error {
 	defer db.invalidate()
 
+	if db.file == nil {
+		return nil
+	}
+
 	// gofail: var unmapError string
 	// return errors.New(unmapError)
-	if err := munmap(db); err != nil {
+	if err := db.file.Munmap(); err != nil {
 		return fmt.Errorf("unmap error: " + err.Error())
 	}
 
@@ -536,7 +562,7 @@ func (db *DB) mmapSize(size int) (int, error) {
 func (db *DB) munlock(fileSize int) error {
 	// gofail: var munlockError string
 	// return errors.New(munlockError)
-	if err := munlock(db, fileSize); err != nil {
+	if err := db.file.Munlock(fileSize); err != nil {
 		return fmt.Errorf("munlock error: " + err.Error())
 	}
 	return nil
@@ -545,7 +571,7 @@ func (db *DB) munlock(fileSize int) error {
 func (db *DB) mlock(fileSize int) error {
 	// gofail: var mlockError string
 	// return errors.New(mlockError)
-	if err := mlock(db, fileSize); err != nil {
+	if err := db.file.Mlock(fileSize); err != nil {
 		return fmt.Errorf("mlock error: " + err.Error())
 	}
 	return nil
@@ -603,10 +629,10 @@ func (db *DB) init() error {
 	p.count = 0
 
 	// Write the buffer to our data file.
-	if _, err := db.ops.writeAt(buf, 0); err != nil {
+	if _, err := db.file.WriteAt(buf, 0); err != nil {
 		return err
 	}
-	if err := fdatasync(db); err != nil {
+	if err := db.file.Fdatasync(); err != nil {
 		return err
 	}
 	db.filesz = len(buf)
@@ -639,9 +665,6 @@ func (db *DB) close() error {
 
 	db.freelist = nil
 
-	// Clear ops.
-	db.ops.writeAt = nil
-
 	var errs []error
 	// Close the mmap.
 	if err := db.munmap(); err != nil {
@@ -653,7 +676,7 @@ func (db *DB) close() error {
 		// No need to unlock read-only file.
 		if !db.readOnly {
 			// Unlock the file.
-			if err := funlock(db); err != nil {
+			if err := db.file.Funlock(); err != nil {
 				errs = append(errs, fmt.Errorf("bolt.Close(): funlock error: %w", err))
 			}
 		}
@@ -716,7 +739,7 @@ func (db *DB) beginTx() (*Tx, error) {
 	}
 
 	// Exit if the database is not correctly mapped.
-	if db.data == nil {
+	if db.file.Mdata() == nil {
 		db.mmaplock.RUnlock()
 		db.metalock.Unlock()
 		return nil, ErrInvalidMapping
@@ -770,7 +793,7 @@ func (db *DB) beginRWTx() (*Tx, error) {
 	}
 
 	// Exit if the database is not correctly mapped.
-	if db.data == nil {
+	if db.file.Mdata() == nil {
 		db.rwlock.Unlock()
 		return nil, ErrInvalidMapping
 	}
@@ -1036,7 +1059,7 @@ func safelyCall(fn func(*Tx) error, tx *Tx) (err error) {
 //
 // This is not necessary under normal operation, however, if you use NoSync
 // then it allows you to force the database file to sync against the disk.
-func (db *DB) Sync() error { return fdatasync(db) }
+func (db *DB) Sync() error { return db.file.Fdatasync() }
 
 // Stats retrieves ongoing performance stats for the database.
 // This is only updated when a transaction closes.
@@ -1049,14 +1072,14 @@ func (db *DB) Stats() Stats {
 // This is for internal access to the raw data bytes from the C cursor, use
 // carefully, or not at all.
 func (db *DB) Info() *Info {
-	_assert(db.data != nil, "database file isn't correctly mapped")
-	return &Info{uintptr(unsafe.Pointer(&db.data[0])), db.pageSize}
+	_assert(db.file.Mdata() != nil, "database file isn't correctly mapped")
+	return &Info{uintptr(unsafe.Pointer(&db.file.Mdata()[0])), db.pageSize}
 }
 
 // page retrieves a page reference from the mmap based on the current page size.
 func (db *DB) page(id pgid) *page {
 	pos := id * pgid(db.pageSize)
-	return (*page)(unsafe.Pointer(&db.data[pos]))
+	return (*page)(unsafe.Pointer(&db.file.Mdata()[pos]))
 }
 
 // pageInBuffer retrieves a page reference from a given byte array based on the current page size.
@@ -1108,7 +1131,7 @@ func (db *DB) allocate(txid txid, count int) (*page, error) {
 	// Resize mmap() if we're at the end.
 	p.id = db.rwtx.meta.pgid
 	var minsz = int((p.id+pgid(count))+1) * db.pageSize
-	if minsz >= db.datasz {
+	if minsz >= db.file.MdataSize() {
 		if err := db.mmap(minsz); err != nil {
 			return nil, fmt.Errorf("mmap allocate error: %s", err)
 		}
@@ -1129,8 +1152,8 @@ func (db *DB) grow(sz int) error {
 
 	// If the data is smaller than the alloc size then only allocate what's needed.
 	// Once it goes over the allocation size then allocate in chunks.
-	if db.datasz <= db.AllocSize {
-		sz = db.datasz
+	if db.file.MdataSize() <= db.AllocSize {
+		sz = db.file.MdataSize()
 	} else {
 		sz += db.AllocSize
 	}
@@ -1139,11 +1162,16 @@ func (db *DB) grow(sz int) error {
 	// https://github.com/boltdb/bolt/issues/284
 	if !db.NoGrowSync && !db.readOnly {
 		if runtime.GOOS != "windows" {
-			if err := db.file.Truncate(int64(sz)); err != nil {
+			if err := db.file.Truncate(int64(sz), true); err != nil {
 				return fmt.Errorf("file resize error: %s", err)
 			}
+			if _, ok := db.file.(*MemFile); ok {
+				if err := db.reloadMeta(); err != nil {
+					return fmt.Errorf("file resize reload meta error: %s", err)
+				}
+			}
 		}
-		if err := db.file.Sync(); err != nil {
+		if err := db.file.Fdatasync(); err != nil {
 			return fmt.Errorf("file sync error: %s", err)
 		}
 		if db.Mlock {
@@ -1180,6 +1208,11 @@ func (db *DB) Copy(w io.Writer) error {
 // WriteTo writes the entire database to a writer.
 // It can't be called concurrently, or inside transactions.
 func (db *DB) WriteTo(w io.Writer) (n int64, err error) {
+	if mem, ok := db.file.(*MemFile); ok {
+		n, err := w.Write(mem.filedata)
+		return int64(n), err
+	}
+
 	// Attempt to open reader with WriteFlag
 	f, err := db.openFile(db.path, os.O_RDONLY, 0)
 	if err != nil {
@@ -1235,7 +1268,6 @@ func (db *DB) CopyFile(path string, mode os.FileMode) error {
 	if err != nil {
 		return err
 	}
-
 	_, err = db.WriteTo(f)
 	if err != nil {
 		_ = f.Close()
@@ -1294,6 +1326,8 @@ type Options struct {
 	// It prevents potential page faults, however
 	// used memory can't be reclaimed. (UNIX only)
 	Mlock bool
+
+	MemData []byte
 }
 
 // DefaultOptions represent the options used if nil options are passed into Open().
@@ -1408,4 +1442,88 @@ func _assert(condition bool, msg string, v ...interface{}) {
 	if !condition {
 		panic(fmt.Sprintf("assertion failed: "+msg, v...))
 	}
+}
+
+func (db *DB) UnsafeMemData() []byte {
+	if f, ok := db.file.(*MemFile); ok {
+		return f.filedata
+	}
+	return nil
+}
+
+func Patch(path string, timeout time.Duration, data []byte) error {
+	db, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	file := &OsFile{file: db}
+	if err := file.Flock(true, timeout); err != nil {
+		return err
+	}
+	defer file.Funlock()
+
+	data, checksum := data[:len(data.PatchData)-20], data[len(data.PatchData)-20:]
+	h := sha1.Sum(data)
+	if !bytes.Equal(h[:], checksum) {
+		return fmt.Errorf("failed to verify db(%s) with corrupted data", path)
+	}
+
+	rd := gzip.NewReader(bytes.NewReader(data))
+	readPage := func(r io.Reader, sz int64) (*page, []byte, error) {
+		buf := make([]byte, sz)
+		if _, err := io.ReadFull(r, buf); err != nil {
+			return nil, nil, err
+		}
+		return (*page)(unsafe.Pointer(&buf[0])), buf, nil
+	}
+	read := func() (p *page, buf []byte, err error) {
+		var size uint32
+		if err := binary.Read(rd, binary.BigEndian, size); err != nil {
+			return nil, nil, err
+		}
+		return readPage(rd, int64(sz))
+	}
+	meta0, _, err := readPage(db, defaultPageSize)
+	if err != nil {
+		return fmt.Errorf("failed to read db(%s) meta page 0: %v", path, err)
+	}
+	meta1, _, err := readPage(db, defaultPageSize)
+	if err != nil {
+		return fmt.Errorf("failed to read db(%s) meta page 1: %v", path, err)
+	}
+	var metaTop *page
+	if err0, err1 := meta0.meta().validate(), meta1.meta().validate(); err0 != nil && err1 != nil {
+		return fmt.Errorf("failed to verify db(%s) meta page: %v", path, err0)
+	} else if err0 == nil && err1 != nil {
+		metaTop = meta0
+	} else if err0 != nil && err1 == nil {
+		metaTop = meta1
+	} else if meta0.meta().txid > meta1.meta().txid {
+		metaTop = meta0
+	} else {
+		metaTop = meta1
+	}
+	meta, metaBuf, err := read()
+	if err != nil {
+		return fmt.Errorf("failed to read patch meta page: %v", path, err)
+	}
+	if meta.meta().txid != metaTop.meta().txid+1 {
+		return fmt.Errorf("invalid patch txid(%d), db txid(%d)", meta.meta().txid, metaTop.meta().txid)
+	}
+	for {
+		p, pBuf, err := read()
+		if err == io.EOF {
+			break
+		} else if err != nil {
+			return fmt.Errorf("failed to read patch page: %v", path, err)
+		}
+		if _, err := db.WriteAt(pBuf, int64(p.id)*int64(defaultPageSize)); err != nil {
+			return fmt.Errorf("failed to write db(%s) page %d: %v", path, p.id, err)
+		}
+	}
+	if _, err := db.WriteAt(metaBuf, int64(meta.id)*int64(defaultPageSize)); err != nil {
+		return fmt.Errorf("failed to write db(%s) meta page %d: %v", path, p.id, err)
+	}
+	return nil
 }
