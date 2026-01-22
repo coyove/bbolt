@@ -1451,25 +1451,20 @@ func (db *DB) UnsafeMemData() []byte {
 	return nil
 }
 
-func Patch(path string, timeout time.Duration, data []byte) error {
-	db, err := os.Open(path)
+func CommitPatch(path string, data []byte) error {
+	db, err := Open(path, 0666, &Options{Timeout: time.Second})
 	if err != nil {
 		return err
 	}
 	defer db.Close()
-	file := &OsFile{file: db}
-	if err := file.Flock(true, timeout); err != nil {
-		return err
-	}
-	defer file.Funlock()
 
-	data, checksum := data[:len(data.PatchData)-20], data[len(data.PatchData)-20:]
+	data, checksum := data[:len(data)-20], data[len(data)-20:]
 	h := sha1.Sum(data)
 	if !bytes.Equal(h[:], checksum) {
 		return fmt.Errorf("failed to verify db(%s) with corrupted data", path)
 	}
 
-	rd := gzip.NewReader(bytes.NewReader(data))
+	rd, _ := gzip.NewReader(bytes.NewReader(data))
 	readPage := func(r io.Reader, sz int64) (*page, []byte, error) {
 		buf := make([]byte, sz)
 		if _, err := io.ReadFull(r, buf); err != nil {
@@ -1482,48 +1477,28 @@ func Patch(path string, timeout time.Duration, data []byte) error {
 		if err := binary.Read(rd, binary.BigEndian, size); err != nil {
 			return nil, nil, err
 		}
-		return readPage(rd, int64(sz))
-	}
-	meta0, _, err := readPage(db, defaultPageSize)
-	if err != nil {
-		return fmt.Errorf("failed to read db(%s) meta page 0: %v", path, err)
-	}
-	meta1, _, err := readPage(db, defaultPageSize)
-	if err != nil {
-		return fmt.Errorf("failed to read db(%s) meta page 1: %v", path, err)
-	}
-	var metaTop *page
-	if err0, err1 := meta0.meta().validate(), meta1.meta().validate(); err0 != nil && err1 != nil {
-		return fmt.Errorf("failed to verify db(%s) meta page: %v", path, err0)
-	} else if err0 == nil && err1 != nil {
-		metaTop = meta0
-	} else if err0 != nil && err1 == nil {
-		metaTop = meta1
-	} else if meta0.meta().txid > meta1.meta().txid {
-		metaTop = meta0
-	} else {
-		metaTop = meta1
+		return readPage(rd, int64(size))
 	}
 	meta, metaBuf, err := read()
 	if err != nil {
-		return fmt.Errorf("failed to read patch meta page: %v", path, err)
+		return fmt.Errorf("failed to read patch meta page: %v", err)
 	}
-	if meta.meta().txid != metaTop.meta().txid+1 {
-		return fmt.Errorf("invalid patch txid(%d), db txid(%d)", meta.meta().txid, metaTop.meta().txid)
+	if meta.meta().txid != db.meta().txid+1 {
+		return fmt.Errorf("invalid patch txid(%d), db txid(%d)", meta.meta().txid, db.meta().txid)
 	}
 	for {
 		p, pBuf, err := read()
 		if err == io.EOF {
 			break
 		} else if err != nil {
-			return fmt.Errorf("failed to read patch page: %v", path, err)
+			return fmt.Errorf("failed to read patch page: %v", err)
 		}
-		if _, err := db.WriteAt(pBuf, int64(p.id)*int64(defaultPageSize)); err != nil {
+		if _, err := db.file.WriteAt(pBuf, int64(p.id)*int64(defaultPageSize)); err != nil {
 			return fmt.Errorf("failed to write db(%s) page %d: %v", path, p.id, err)
 		}
 	}
-	if _, err := db.WriteAt(metaBuf, int64(meta.id)*int64(defaultPageSize)); err != nil {
-		return fmt.Errorf("failed to write db(%s) meta page %d: %v", path, p.id, err)
+	if _, err := db.file.WriteAt(metaBuf, int64(meta.id)*int64(defaultPageSize)); err != nil {
+		return fmt.Errorf("failed to write db(%s) meta page %d: %v", path, meta.id, err)
 	}
 	return nil
 }
