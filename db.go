@@ -1089,12 +1089,13 @@ func (db *DB) meta() *meta {
 }
 
 func ReadTxID(buf []byte) uint64 {
-	meta := (*[2]meta)(unsafe.Pointer(&buf[0]))
-	metaA := meta[0]
-	metaB := meta[1]
-	if meta[1].txid > meta[0].txid {
-		metaA = meta[1]
-		metaB = meta[0]
+	p0 := (*page)(unsafe.Pointer(&buf[0]))
+	p1 := (*page)(unsafe.Pointer(&buf[defaultPageSize]))
+	metaA := p0.meta()
+	metaB := p1.meta()
+	if p1.meta().txid > p0.meta().txid {
+		metaA = p1.meta()
+		metaB = p0.meta()
 	}
 
 	if err := metaA.validate(); err == nil {
