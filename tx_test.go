@@ -839,7 +839,7 @@ func ExampleTx_Rollback() {
 	// The value for 'foo' is still: bar
 }
 
-func ExampleTx_CopyFile() {
+func ExampleDB_CopyFile() {
 	// Open the database.
 	db, err := bolt.Open(tempfile(), 0666, nil)
 	if err != nil {

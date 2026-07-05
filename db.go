@@ -1088,6 +1088,24 @@ func (db *DB) meta() *meta {
 	panic("bolt.DB.meta(): invalid meta pages")
 }
 
+func ReadTxID(buf []byte) uint64 {
+	meta := (*[2]meta)(unsafe.Pointer(&buf[0]))
+	metaA := meta[0]
+	metaB := meta[1]
+	if meta[1].txid > meta[0].txid {
+		metaA = meta[1]
+		metaB = meta[0]
+	}
+
+	if err := metaA.validate(); err == nil {
+		return uint64(metaA.txid)
+	} else if err := metaB.validate(); err == nil {
+		return uint64(metaB.txid)
+	}
+
+	panic("bolt.DB.meta(): invalid meta pages")
+}
+
 // allocate returns a contiguous block of memory starting at a given page.
 func (db *DB) allocate(txid txid, count int) (*page, error) {
 	// Allocate a temporary buffer for the page.
