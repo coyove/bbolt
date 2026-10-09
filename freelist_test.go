@@ -301,6 +301,55 @@ func TestFreelist_write(t *testing.T) {
 	}
 }
 
+// Ensure that reload keeps pages that are still pending out of the free list,
+// including when every free page on disk is pending.
+func TestFreelist_reload_pendingNotFree(t *testing.T) {
+	for _, typ := range []FreelistType{FreelistArrayType, FreelistMapType} {
+		t.Run(string(typ), func(t *testing.T) {
+			var buf [4096]byte
+			f := newFreelist(typ)
+			f.readIDs([]pgid{5, 6, 8})
+			p := (*page)(unsafe.Pointer(&buf[0]))
+			if err := f.write(p); err != nil {
+				t.Fatal(err)
+			}
+
+			f2 := newFreelist(typ)
+			f2.free(txid(5), &page{id: 5, flags: leafPageFlag, overflow: 4})
+			f2.reload(p)
+
+			if got := f2.getFreePageIDs(); len(got) != 0 {
+				t.Fatalf("exp no free ids; got=%v", got)
+			}
+			if exp := []pgid{5, 6, 7, 8, 9}; !reflect.DeepEqual(exp, f2.pending[5].ids) {
+				t.Fatalf("exp=%v; got=%v", exp, f2.pending[5].ids)
+			}
+		})
+	}
+}
+
+// Ensure that reading an empty freelist page clears previously free pages.
+func TestFreelist_read_empty(t *testing.T) {
+	for _, typ := range []FreelistType{FreelistArrayType, FreelistMapType} {
+		t.Run(string(typ), func(t *testing.T) {
+			var buf [4096]byte
+			p := (*page)(unsafe.Pointer(&buf[0]))
+			p.flags = freelistPageFlag
+
+			f := newFreelist(typ)
+			f.readIDs([]pgid{3, 4, 9})
+			f.read(p)
+
+			if got := f.getFreePageIDs(); len(got) != 0 {
+				t.Fatalf("exp no free ids; got=%v", got)
+			}
+			if got := f.free_count(); got != 0 {
+				t.Fatalf("exp free count 0; got=%d", got)
+			}
+		})
+	}
+}
+
 func Benchmark_FreelistRelease10K(b *testing.B)    { benchmark_FreelistRelease(b, 10000) }
 func Benchmark_FreelistRelease100K(b *testing.B)   { benchmark_FreelistRelease(b, 100000) }
 func Benchmark_FreelistRelease1000K(b *testing.B)  { benchmark_FreelistRelease(b, 1000000) }

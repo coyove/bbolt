@@ -144,6 +144,10 @@ func (f *freelist) delSpan(start pgid, size uint64) {
 // initial from pgids using when use hashmap version
 // pgids must be sorted
 func (f *freelist) init(pgids []pgid) {
+	f.freemaps = make(map[uint64]pidSet)
+	f.forwardMap = make(map[pgid]uint64)
+	f.backwardMap = make(map[pgid]uint64)
+
 	if len(pgids) == 0 {
 		return
 	}
@@ -154,10 +158,6 @@ func (f *freelist) init(pgids []pgid) {
 	if !sort.SliceIsSorted([]pgid(pgids), func(i, j int) bool { return pgids[i] < pgids[j] }) {
 		panic("pgids not sorted")
 	}
-
-	f.freemaps = make(map[uint64]pidSet)
-	f.forwardMap = make(map[pgid]uint64)
-	f.backwardMap = make(map[pgid]uint64)
 
 	for i := 1; i < len(pgids); i++ {
 		// continuous page

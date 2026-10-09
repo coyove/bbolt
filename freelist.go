@@ -280,7 +280,7 @@ func (f *freelist) read(p *page) {
 
 	// Copy the list of page ids from the freelist.
 	if count == 0 {
-		f.ids = nil
+		f.readIDs(nil)
 	} else {
 		var ids []pgid
 		data := unsafeIndex(unsafe.Pointer(p), unsafe.Sizeof(*p), unsafe.Sizeof(ids[0]), idx)
